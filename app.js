@@ -690,10 +690,30 @@ let deferredInstall = null;
 
 function setupInstallPrompt() {
   const btn = $('btnInstall');
+  const ua = navigator.userAgent || '';
+  const isIOS = /iphone|ipad|ipod/i.test(ua);
+  const isAndroid = /android/i.test(ua);
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches ||
+                       window.navigator.standalone === true;
+
+  // Already installed → nothing to offer.
+  if (isStandalone) return;
+
+  // iOS Safari has no install prompt API — show a manual hint (phone only).
+  if (isIOS) {
+    btn.hidden = false;
+    btn.addEventListener('click', () => {
+      toast('Нажмите «Поделиться» внизу Safari → «На экран Домой»', 'ok');
+      btn.hidden = true;   // one-time hint per session
+    });
+    return;
+  }
+
+  // Android Chrome: real prompt. Desktop: don't show the button at all.
   window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
     deferredInstall = e;
-    btn.hidden = false;
+    if (isAndroid) btn.hidden = false;
   });
   btn.addEventListener('click', async () => {
     if (!deferredInstall) return;

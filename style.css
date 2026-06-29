@@ -281,7 +281,7 @@ select {
 .btn-install {
   position: fixed;
   left: 50%;
-  bottom: calc(var(--safe-bottom) + 20px);
+  bottom: calc(var(--safe-bottom) + 96px);   /* sit above the bottom tab bar */
   transform: translateX(-50%);
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
   color: #fff;
