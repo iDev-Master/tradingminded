@@ -1,75 +1,82 @@
 /* ============================================================
-   Salmon — бэкенд на Google Apps Script (code.gs)
-   Работает поверх таблицы Salmon (листы «Продажи», «Справочники»).
-   Авторизация по токену, роли admin / viewer.
+   Salmon — backend (Google Apps Script, code.gs)
+   ONE copy per client (own Sheet, own deployment, own URL).
+   ------------------------------------------------------------
+   This is the ONLY place with business logic: token/role check,
+   validation, calculations, formatting, and deciding what the UI
+   may show. The frontend just renders whatever this returns.
 
    ┌──────────────────────────────────────────────────────────┐
-   │ КАК ЗАДАТЬ ТОКЕНЫ (не хранятся в коде):                   │
-   │  ⚙ Настройки проекта → «Свойства скрипта» →               │
-   │     Имя (key)  = сам токен (напр. a1b2c3d4)               │
-   │     Значение   = admin  ИЛИ  viewer                       │
-   │  Либо запустите один раз seedTokens() (см. внизу).        │
+   │ SET TOKENS (never stored in code):                        │
+   │  Project Settings (⚙) → Script properties → Add property  │
+   │     Name (key)  = the token itself (e.g. a1b2c3d4)        │
+   │     Value       = admin  OR  viewer                       │
+   │  Or run seedTokens() once (see bottom), then clear it.    │
    └──────────────────────────────────────────────────────────┘
-   После правок кода: Развернуть → Управление развёртываниями →
-   ✎ → Новая версия → Развернуть.
+   After editing code: Deploy → Manage deployments → ✎ → New
+   version → Deploy.
 ============================================================ */
 
-/* ---- Карта листа «Продажи» (номера колонок) ---- */
+/* ---- "Продажи" sheet column map ---- */
 var SALES = 'Продажи';
 var COL = { num:1, date:2, sku:3, name:4, qty:5, price:6, disc:7, discType:8,
             sum:9, cost:10, profit:11, client:12, pay:13 };
 var SALES_WIDTH = 13;
-var SALES_FIRST_ROW = 4;        // первая строка данных (3 — шапка)
-var SALES_TEMPLATE_ROW = 4;     // строка-образец с формулами
+var SALES_FIRST_ROW = 4;       // first data row (3 is the header)
+var SALES_TEMPLATE_ROW = 4;    // row that holds the live formulas to copy down
 
-/* ---- Справочники ---- */
+/* ---- Reference ranges in "Справочники" ---- */
 var REF = 'Справочники';
-var GOODS_RANGE   = 'A5:F104';   // товары: A арт, C наим, F цена
-var GOODS_FIRST   = 5;
+var GOODS_RANGE = 'A5:F104';   // A sku, C name, F sale price
 var ACCOUNTS_RANGE = 'A109:A128';
 
 /* ============================================================
-   ТОЧКИ ВХОДА
+   ENTRY POINTS
 ============================================================ */
-function doGet(e)  { return handle(e, getParams(e)); }
+function doGet(e)  { return handle(getParams(e)); }
 
 function doPost(e) {
   var body = {};
   try { body = JSON.parse(e.postData.contents); }
-  catch (err) { return json({ error:'bad_request', message:'Некорректный JSON' }); }
-  return handle(e, body);
+  catch (err) { return json({ error: 'bad_request', message: 'Некорректный JSON' }); }
+  return handle(body);
 }
 
 /* ============================================================
-   ОБЩИЙ ОБРАБОТЧИК
+   ROUTER  (token → role → action)
 ============================================================ */
-function handle(e, params) {
+function handle(params) {
   var token = (params.token || '').toString().trim();
   var action = (params.action || '').toString();
 
   var role = roleForToken(token);
-  if (!role) return json({ error:'unauthorized' });
+  if (!role) return json({ error: 'unauthorized' });
 
   switch (action) {
     case 'whoami':
-      // отдаём роль + справочники для выпадающих списков фронта
-      return json({ ok:true, role:role, accounts:getAccounts(), products:getProducts() });
+      // The server decides what this role may do and which form to show.
+      return json({
+        ok: true,
+        role: role,
+        actions: role === 'admin' ? ['submit', 'load'] : ['load'],
+        form: role === 'admin' ? buildFormSchema() : null
+      });
 
     case 'read':
-      return json({ ok:true, role:role, rows:readSales() });
+      return json({ ok: true, role: role, list: readSalesList() });
 
     case 'create':
       if (role !== 'admin')
-        return json({ error:'forbidden', message:'Только admin может добавлять продажи' });
-      return createSale(params.row || {}, role);
+        return json({ error: 'forbidden', message: 'Только admin может добавлять записи' });
+      return createSale(params.row || {});
 
     default:
-      return json({ error:'bad_request', message:'Неизвестное действие: ' + action });
+      return json({ error: 'bad_request', message: 'Неизвестное действие: ' + action });
   }
 }
 
 /* ============================================================
-   АВТОРИЗАЦИЯ
+   AUTH
 ============================================================ */
 function roleForToken(token) {
   if (!token) return null;
@@ -78,31 +85,46 @@ function roleForToken(token) {
 }
 
 /* ============================================================
-   СПРАВОЧНИКИ (для фронтенда)
+   FORM SCHEMA  (server-built; frontend just renders it)
 ============================================================ */
-function getProducts() {
-  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(REF);
-  if (!sh) return [];
-  var vals = sh.getRange(GOODS_RANGE).getValues();   // [A,B,C,D,E,F]
-  var out = [];
-  vals.forEach(function (r) {
-    if (r[0] !== '' && r[0] != null) {
-      out.push({ sku: r[0], name: r[2], price: Number(r[5]) || 0 });
-    }
-  });
-  return out;
+function buildFormSchema() {
+  return {
+    title: 'Новая продажа',
+    fields: [
+      { key: 'date',     label: 'Дата',        type: 'date',   default: 'today' },
+      { key: 'sku',      label: 'Товар',       type: 'select', options: productOptions() },
+      { key: 'qty',      label: 'Кол-во',      type: 'number', default: 1 },
+      { key: 'discount', label: 'Скидка',      type: 'number', default: 0 },
+      { key: 'discType', label: 'Тип скидки',  type: 'select',
+        options: [{ value: 'Сумма', label: 'сумма' }, { value: '%', label: '%' }] },
+      { key: 'client',   label: 'Клиент',      type: 'text' },
+      { key: 'payment',  label: 'Оплата',      type: 'select', options: paymentOptions() }
+    ]
+  };
 }
 
-function getAccounts() {
+function productOptions() {
   var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(REF);
   if (!sh) return [];
-  return sh.getRange(ACCOUNTS_RANGE).getValues()
-           .map(function (r) { return r[0]; })
-           .filter(function (v) { return v !== '' && v != null; });
+  return sh.getRange(GOODS_RANGE).getValues()
+    .filter(function (r) { return r[0] !== '' && r[0] != null; })
+    .map(function (r) { return { value: r[0], label: r[0] + ' — ' + r[2] }; });
+}
+
+function paymentOptions() {
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(REF);
+  var opts = [];
+  if (sh) {
+    sh.getRange(ACCOUNTS_RANGE).getValues().forEach(function (r) {
+      if (r[0] !== '' && r[0] != null) opts.push({ value: r[0], label: r[0] });
+    });
+  }
+  opts.push({ value: 'В долг', label: 'В долг' });   // sell-on-credit option
+  return opts;
 }
 
 /* ============================================================
-   ПРОДАЖИ — чтение
+   READ — return display-ready data (all formatting server-side)
 ============================================================ */
 function getSalesSheet() {
   var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SALES);
@@ -110,8 +132,8 @@ function getSalesSheet() {
   return sh;
 }
 
-// Последняя строка с данными определяется по колонке «Артикул» (C),
-// т.к. формулы в пустых строках делают getLastRow() ненадёжным.
+// Last data row is found by the "Артикул" column, because formula cells
+// in empty rows make getLastRow() unreliable.
 function lastSalesRow(sh) {
   var col = sh.getRange(SALES_FIRST_ROW, COL.sku,
                         Math.max(1, sh.getMaxRows() - SALES_FIRST_ROW + 1), 1).getValues();
@@ -122,75 +144,110 @@ function lastSalesRow(sh) {
   return last;
 }
 
-function readSales() {
+function readSalesList() {
   var sh = getSalesSheet();
   var last = lastSalesRow(sh);
-  if (last < SALES_FIRST_ROW) return [];
-  var vals = sh.getRange(SALES_FIRST_ROW, 1, last - SALES_FIRST_ROW + 1, SALES_WIDTH).getValues();
-  return vals.map(function (r) {
-    return {
-      date:   fmtCell(r[COL.date - 1]),
-      sku:    r[COL.sku - 1],
-      name:   r[COL.name - 1],
-      qty:    r[COL.qty - 1],
-      price:  r[COL.price - 1],
-      disc:   r[COL.disc - 1],
-      sum:    r[COL.sum - 1],
-      profit: r[COL.profit - 1],
-      client: r[COL.client - 1],
-      payment:r[COL.pay - 1]
-    };
-  });
+  var items = [], total = 0;
+
+  if (last >= SALES_FIRST_ROW) {
+    var vals = sh.getRange(SALES_FIRST_ROW, 1, last - SALES_FIRST_ROW + 1, SALES_WIDTH).getValues();
+    vals.forEach(function (r) {
+      var sum = Number(r[COL.sum - 1]) || 0;
+      total += sum;
+      var meta = [];
+      var d = fmtDate(r[COL.date - 1]);                          if (d) meta.push(d);
+      if (r[COL.qty - 1]) meta.push(fmtNum(r[COL.qty - 1]) + ' × ' + fmtMoney(r[COL.price - 1]));
+      if (r[COL.client - 1]) meta.push(String(r[COL.client - 1]));
+      if (r[COL.pay - 1])    meta.push(String(r[COL.pay - 1]));
+      items.push({
+        title: r[COL.name - 1] || r[COL.sku - 1] || '—',
+        meta: meta,
+        amount: fmtMoney(sum) + ' ₽'
+      });
+    });
+  }
+
+  items.reverse();   // newest first
+  return {
+    items: items,
+    summary: [
+      { label: 'записей',  value: String(items.length) },
+      { label: 'выручка',  value: fmtMoney(total) + ' ₽' }
+    ]
+  };
 }
 
 /* ============================================================
-   ПРОДАЖИ — создание (только admin)
-   Пишем только во ВВОДНЫЕ колонки, формулы (Наименование, Цена,
-   Сумма, Себест, Прибыль) копируем из строки-образца — чтобы
-   расчёты на листе оставались «живыми».
+   CREATE — validate + write (admin only)
+   Writes only the INPUT cells; formula columns are copied from the
+   template row so the sheet keeps computing sum/cost/profit.
 ============================================================ */
-function createSale(row, role) {
+function createSale(row) {
+  // --- server-side validation (no validation on the client) ---
+  var sku = (row.sku || '').toString().trim();
+  var qty = Number(row.qty);
+  if (!sku)               return json({ error: 'validation', message: 'Выберите товар' });
+  if (!(qty > 0))         return json({ error: 'validation', message: 'Количество должно быть больше 0' });
+  var discType = (row.discType === '%') ? '%' : 'Сумма';
+  var discount = Number(row.discount) || 0;
+
   var sh = getSalesSheet();
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
     var newRow = lastSalesRow(sh) + 1;
 
-    // 1. Копируем строку-образец (формулы + форматы + проверки) на новую строку
+    // Copy formulas + formats + data-validations from the template row.
     sh.getRange(SALES_TEMPLATE_ROW, 1, 1, SALES_WIDTH)
       .copyTo(sh.getRange(newRow, 1, 1, SALES_WIDTH));
 
-    // 2. Перезаписываем вводные ячейки реальными значениями
+    // Overwrite the input cells with real values.
     sh.getRange(newRow, COL.date).setValue(parseDate(row.date));
-    sh.getRange(newRow, COL.sku).setValue(row.sku || '');
-    sh.getRange(newRow, COL.qty).setValue(Number(row.qty) || 0);
-    sh.getRange(newRow, COL.disc).setValue(Number(row.discount) || 0);
-    sh.getRange(newRow, COL.discType).setValue(row.discType || 'Сумма');
-    sh.getRange(newRow, COL.client).setValue(row.client || '');
-    sh.getRange(newRow, COL.pay).setValue(row.payment || '');
+    sh.getRange(newRow, COL.sku).setValue(sku);
+    sh.getRange(newRow, COL.qty).setValue(qty);
+    sh.getRange(newRow, COL.disc).setValue(discount);
+    sh.getRange(newRow, COL.discType).setValue(discType);
+    sh.getRange(newRow, COL.client).setValue((row.client || '').toString().trim());
+    sh.getRange(newRow, COL.pay).setValue((row.payment || '').toString().trim());
 
     SpreadsheetApp.flush();
-    return json({ ok:true, role:role });
+    // Read back the computed total to confirm the saved amount.
+    var sum = Number(sh.getRange(newRow, COL.sum).getValue()) || 0;
+    return json({ ok: true, message: 'Продажа сохранена: ' + fmtMoney(sum) + ' ₽' });
   } finally {
     lock.releaseLock();
   }
 }
 
 /* ============================================================
-   ВСПОМОГАТЕЛЬНОЕ
+   HELPERS  (parsing & formatting — all server-side)
 ============================================================ */
 function getParams(e) { return (e && e.parameter) ? e.parameter : {}; }
 
 function parseDate(s) {
   if (!s) return new Date();
-  var m = String(s).match(/^(\d{4})-(\d{2})-(\d{2})/);   // yyyy-mm-dd с фронта
+  var m = String(s).match(/^(\d{4})-(\d{2})-(\d{2})/);   // yyyy-mm-dd from the frontend
   if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
   return s;
 }
 
-function fmtCell(v) {
-  if (v instanceof Date) return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd');
-  return v;
+function fmtDate(v) {
+  if (v instanceof Date) return Utilities.formatDate(v, Session.getScriptTimeZone(), 'dd.MM.yyyy');
+  return v ? String(v) : '';
+}
+
+// 1234.5 → "1 234,50"  (space thousands, comma decimal)
+function fmtMoney(n) {
+  n = Number(n) || 0;
+  var parts = n.toFixed(2).split('.');
+  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  return parts[0] + ',' + parts[1];
+}
+
+// Quantity without forced decimals: 3 → "3", 2.5 → "2,5"
+function fmtNum(n) {
+  n = Number(n) || 0;
+  return (Number.isInteger(n) ? String(n) : String(n).replace('.', ',')).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 }
 
 function json(obj) {
@@ -199,14 +256,14 @@ function json(obj) {
 }
 
 /* ============================================================
-   (НЕОБЯЗАТЕЛЬНО) Быстрое создание токенов — запустите 1 раз
+   (OPTIONAL) one-shot token seeding — run once, then clear it
 ============================================================ */
 function seedTokens() {
   PropertiesService.getScriptProperties().setProperties({
     'admin-CHANGE-ME-123':  'admin',
     'viewer-CHANGE-ME-456': 'viewer'
   });
-  Logger.log('Токены записаны.');
+  Logger.log('Tokens written to Script properties.');
 }
 
 function makeToken() {

@@ -1,30 +1,21 @@
 /* ============================================================
-   Salmon — клиентская логика (app.js)
-   PWA-фронтенд: вход по токену, роли admin/viewer,
-   регистрация продаж и чтение данных через Google Apps Script.
-   Модель соответствует листу «Продажи» из Salmon.xlsx.
+   Salmon — single, client-agnostic frontend (app.js)
+   ------------------------------------------------------------
+   This file is IDENTICAL for every client. Per-client values live
+   in configs/<id>.js and the active client is chosen by the URL
+   query param (?client=<id>). The frontend stays "dumb":
+   it picks the client, sends the token, and renders whatever the
+   backend returns (role, allowed actions, form schema, formatted
+   data). No business logic, validation, math or formatting here.
    ============================================================ */
 
 'use strict';
 
 /* ------------------------------------------------------------
-   1. КОНФИГ — вставьте URL вашего Web App из Apps Script
-------------------------------------------------------------- */
-const API_URL = 'ВСТАВЬТЕ_СЮДА_URL_ВЕБ_ПРИЛОЖЕНИЯ';
-
-const TOKEN_KEY = 'salmon_token';
-
-/* ------------------------------------------------------------
-   2. Хелперы
+   Tiny DOM/utility helpers
 ------------------------------------------------------------- */
 const $ = (id) => document.getElementById(id);
-const getToken = () => localStorage.getItem(TOKEN_KEY) || '';
-const setToken = (t) => localStorage.setItem(TOKEN_KEY, t);
-const clearToken = () => localStorage.removeItem(TOKEN_KEY);
-
-function fmtMoney(n) {
-  return (Number(n) || 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 });
-}
+const qsParam = (name) => new URLSearchParams(location.search).get(name);
 
 function toast(msg, type = '') {
   const el = $('toast');
@@ -43,24 +34,87 @@ function status(el, msg, kind) {
 }
 
 /* ------------------------------------------------------------
-   3. Сетевой слой (CORS-safe: POST как text/plain)
+   Global state for the active client/session
 ------------------------------------------------------------- */
-function ensureConfigured() {
-  if (!API_URL || API_URL.startsWith('ВСТАВЬТЕ')) {
-    throw new Error('Не задан URL бэкенда. Откройте app.js и впишите API_URL.');
-  }
+const state = {
+  clientId: null,   // from ?client=
+  config: null,     // resolved config object from configs/<id>.js
+  session: null     // last whoami response: {role, actions, form}
+};
+
+const tokenKey = () => 'salmon_token_' + state.clientId;   // namespaced per client
+const getToken = () => localStorage.getItem(tokenKey()) || '';
+const setToken = (t) => localStorage.setItem(tokenKey(), t);
+const clearToken = () => localStorage.removeItem(tokenKey());
+
+/* ============================================================
+   1. CLIENT CONFIG LOADING (multi-tenant)
+   ------------------------------------------------------------
+   configs/<id>.js calls registerClient({...}). app.js injects that
+   script based on ?client=, so adding a client = adding one file.
+============================================================ */
+
+// Called by every configs/<id>.js file.
+window.registerClient = function (cfg) { window.__CLIENT__ = cfg; };
+
+function loadClientConfig(id) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'configs/' + id + '.js';     // relative — works under /repo/ on Pages
+    s.onload = () => resolve(window.__CLIENT__);
+    s.onerror = () => reject(new Error('no-config'));
+    document.head.appendChild(s);
+  });
 }
 
+/* ------------------------------------------------------------
+   Apply per-client theme + per-client PWA manifest
+------------------------------------------------------------- */
+function applyTheme(theme) {
+  if (!theme) return;
+  const root = document.documentElement.style;
+  if (theme.bg)      root.setProperty('--bg', theme.bg);
+  if (theme.accent)  root.setProperty('--accent', theme.accent);
+  if (theme.accent2) root.setProperty('--accent-2', theme.accent2);
+  if (theme.accent)  $('themeColorMeta').setAttribute('content', theme.accent);
+}
+
+// Build a per-client manifest at runtime so an installed PWA keeps
+// the ?client= param (single static manifest can't do that).
+function applyManifest(cfg) {
+  const manifest = {
+    name: cfg.name,
+    short_name: cfg.name,
+    description: 'Складской учёт и продажи',
+    lang: 'ru',
+    start_url: './?client=' + cfg.id,    // preserves the client on launch
+    scope: './',
+    display: 'standalone',
+    orientation: 'portrait',
+    background_color: (cfg.theme && cfg.theme.bg) || '#0f172a',
+    theme_color: (cfg.theme && cfg.theme.accent) || '#0f766e',
+    icons: [
+      { src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
+      { src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' }
+    ]
+  };
+  const blob = new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' });
+  $('manifestLink').href = URL.createObjectURL(blob);
+}
+
+/* ============================================================
+   2. NETWORK LAYER (CORS-safe for Apps Script)
+   - POST is sent as text/plain to avoid the preflight Apps Script
+     can't answer; token travels in the body / query, never a header.
+============================================================ */
 async function apiGet(action, extra = {}) {
-  ensureConfigured();
   const params = new URLSearchParams({ token: getToken(), action, ...extra });
-  const res = await fetch(`${API_URL}?${params.toString()}`, { method: 'GET' });
+  const res = await fetch(state.config.apiUrl + '?' + params.toString(), { method: 'GET' });
   return parseResponse(res);
 }
 
 async function apiPost(action, payload = {}) {
-  ensureConfigured();
-  const res = await fetch(API_URL, {
+  const res = await fetch(state.config.apiUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
     body: JSON.stringify({ token: getToken(), action, ...payload })
@@ -68,6 +122,7 @@ async function apiPost(action, payload = {}) {
   return parseResponse(res);
 }
 
+// Normalise the response and surface backend errors as exceptions.
 async function parseResponse(res) {
   let data;
   try { data = JSON.parse(await res.text()); }
@@ -75,7 +130,7 @@ async function parseResponse(res) {
   if (data && data.error) {
     if (data.error === 'unauthorized') throw new Error('Неверный токен.');
     if (data.error === 'forbidden')    throw new Error('Недостаточно прав для этого действия.');
-    throw new Error(data.message || data.error);
+    throw new Error(data.message || data.error);   // validation/etc → server message
   }
   return data;
 }
@@ -85,58 +140,139 @@ function describeError(err) {
   return err.message || 'Неизвестная ошибка.';
 }
 
-/* ------------------------------------------------------------
-   4. Состояние
-------------------------------------------------------------- */
-let currentRole = null;
-let products = [];   // [{sku, name, price}]
-let accounts = [];   // ["Касса (сомони)", ...]
+/* ============================================================
+   3. SCREEN NAVIGATION
+============================================================ */
+function showFatal(text) {
+  ['topbar', 'loginScreen', 'appScreen'].forEach(id => $(id).hidden = true);
+  $('fatalText').textContent = text;
+  $('fatalScreen').hidden = false;
+}
 
 function showLogin() {
   $('topbar').hidden = true;
   $('appScreen').hidden = true;
+  $('fatalScreen').hidden = true;
   $('loginScreen').hidden = false;
   $('tokenInput').value = '';
 }
 
-function showApp(role) {
-  currentRole = role;
+function showApp() {
   $('loginScreen').hidden = true;
+  $('fatalScreen').hidden = true;
   $('topbar').hidden = false;
   $('appScreen').hidden = false;
+}
+
+/* ============================================================
+   4. RENDERING — driven entirely by the server response
+============================================================ */
+
+// Build the whole UI from a whoami session: role badge, form, buttons.
+function renderSession(session) {
+  state.session = session;
+  const actions = session.actions || [];
 
   const badge = $('roleBadge');
-  badge.textContent = role === 'admin' ? 'admin' : 'viewer';
-  badge.className = 'role-badge ' + (role === 'admin' ? 'admin' : 'viewer');
+  badge.textContent = session.role || '';
+  badge.className = 'role-badge ' + (session.role === 'admin' ? 'admin' : 'viewer');
 
-  $('formCard').hidden = (role !== 'admin');
-  $('fDate').value = new Date().toISOString().slice(0, 10);
+  // Form is shown only if the server allows 'submit' and sent a schema.
+  if (actions.indexOf('submit') !== -1 && session.form) {
+    renderForm(session.form);
+    $('formCard').hidden = false;
+  } else {
+    $('formCard').hidden = true;
+  }
+
+  // Data card / Load button shown if 'load' is allowed.
+  $('dataCard').hidden = (actions.indexOf('load') === -1);
 }
 
-/* Заполняем выпадающие списки из справочников бэкенда */
-function fillReferences() {
-  // товары
-  const sel = $('fSku');
-  sel.innerHTML = '<option value="">— выберите товар —</option>';
-  products.forEach(p => {
-    const o = document.createElement('option');
-    o.value = p.sku;
-    o.textContent = `${p.sku} — ${p.name}`;
-    sel.appendChild(o);
-  });
-  // счета
-  const pay = $('fPay');
-  pay.innerHTML = '';
-  accounts.forEach(a => {
-    const o = document.createElement('option');
-    o.value = a; o.textContent = a;
-    pay.appendChild(o);
+// Render form inputs from a schema: [{key,label,type,default,options}]
+function renderForm(form) {
+  $('formTitle').textContent = form.title || 'Форма';
+  const box = $('formFields');
+  box.innerHTML = '';
+
+  (form.fields || []).forEach(f => {
+    const label = document.createElement('label');
+    label.className = 'field';
+    label.innerHTML = '<span class="field__label">' + escapeHtml(f.label || f.key) + '</span>';
+
+    let input;
+    if (f.type === 'select') {
+      input = document.createElement('select');
+      (f.options || []).forEach(opt => {
+        const o = document.createElement('option');
+        o.value = opt.value;
+        o.textContent = opt.label;
+        input.appendChild(o);
+      });
+    } else {
+      input = document.createElement('input');
+      input.type = f.type || 'text';
+      if (f.type === 'number') input.inputMode = 'decimal';
+    }
+    input.dataset.key = f.key;
+
+    // 'today' is just a convenience default value, not client-side logic.
+    if (f.default === 'today') input.value = new Date().toISOString().slice(0, 10);
+    else if (f.default != null) input.value = f.default;
+
+    label.appendChild(input);
+    box.appendChild(label);
   });
 }
 
-/* ------------------------------------------------------------
-   5. Действия
-------------------------------------------------------------- */
+// Collect the form values into a flat object keyed by field key.
+function collectForm() {
+  const row = {};
+  $('formFields').querySelectorAll('[data-key]').forEach(el => { row[el.dataset.key] = el.value; });
+  return row;
+}
+
+// Render the data list: server sends pre-formatted strings only.
+function renderData(list) {
+  const items = (list && list.items) || [];
+  const summary = (list && list.summary) || [];
+
+  // Summary chips
+  const sumBox = $('summary');
+  if (summary.length) {
+    sumBox.innerHTML = summary.map(s =>
+      '<div class="summary__item"><span class="summary__val">' + escapeHtml(s.value) +
+      '</span><span class="summary__lbl">' + escapeHtml(s.label) + '</span></div>'
+    ).join('');
+    sumBox.hidden = false;
+  } else {
+    sumBox.hidden = true;
+  }
+
+  // Items
+  const listBox = $('dataList');
+  if (!items.length) {
+    listBox.innerHTML = '<div class="row-item__empty">Пока нет записей</div>';
+    return;
+  }
+  listBox.innerHTML = items.map(it => {
+    const meta = (it.meta || []).map(m => '<span>' + escapeHtml(m) + '</span>').join('');
+    return '<div class="row-item"><div class="row-item__head">' +
+           '<span class="row-item__name">' + escapeHtml(it.title || '') + '</span>' +
+           '<span class="row-item__sum">' + escapeHtml(it.amount || '') + '</span></div>' +
+           '<div class="row-item__meta">' + meta + '</div></div>';
+  }).join('');
+}
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+}
+
+/* ============================================================
+   5. ACTIONS
+============================================================ */
 async function doLogin() {
   const token = $('tokenInput').value.trim();
   const btn = $('btnLogin');
@@ -147,13 +283,11 @@ async function doLogin() {
   btn.disabled = true;
   btn.innerHTML = '<span class="spin"></span> Проверка…';
   try {
-    const data = await apiGet('whoami');
-    products = data.products || [];
-    accounts = data.accounts || [];
-    fillReferences();
-    showApp(data.role);
-    toast(`Вы вошли как ${data.role}`, 'ok');
-    loadData();
+    const session = await apiGet('whoami');
+    showApp();
+    renderSession(session);
+    toast('Вы вошли как ' + session.role, 'ok');
+    if ((session.actions || []).indexOf('load') !== -1) loadData();
   } catch (err) {
     clearToken();
     status($('loginError'), describeError(err), 'err');
@@ -165,68 +299,24 @@ async function doLogin() {
 
 function doLogout() {
   clearToken();
-  currentRole = null;
+  state.session = null;
   $('dataList').innerHTML = '';
   $('summary').hidden = true;
   showLogin();
   toast('Вы вышли');
 }
 
-/* Выбор товара → подставить цену из справочника */
-function onPickProduct() {
-  const p = products.find(x => x.sku === $('fSku').value);
-  $('fPrice').value = p ? p.price : '';
-  recalcSum();
-}
-
-/* Переключатель «в долг» — прячем выбор счёта */
-function onToggleDebt() {
-  $('payField').style.display = $('fDebt').checked ? 'none' : 'block';
-}
-
-/* Пересчёт итоговой суммы со скидкой */
-function recalcSum() {
-  const qty = parseFloat($('fQty').value) || 0;
-  const price = parseFloat($('fPrice').value) || 0;
-  const disc = parseFloat($('fDisc').value) || 0;
-  const base = qty * price;
-  const sum = $('fDiscType').value === '%' ? base - base * disc / 100 : base - disc;
-  $('fSum').textContent = fmtMoney(Math.max(0, sum));
-}
-
 async function submitData() {
-  const qty = parseFloat($('fQty').value);
-  const price = parseFloat($('fPrice').value);
-
-  if (!$('fSku').value)            return toast('Выберите товар', 'err');
-  if (isNaN(qty) || qty <= 0)      return toast('Введите количество', 'err');
-  if (isNaN(price) || price < 0)   return toast('Нет цены товара', 'err');
-
-  const inDebt = $('fDebt').checked;
-  const payload = {
-    row: {
-      date:       $('fDate').value,
-      sku:        $('fSku').value,
-      qty:        qty,
-      discount:   parseFloat($('fDisc').value) || 0,
-      discType:   $('fDiscType').value,
-      client:     $('fClient').value.trim(),
-      payment:    inDebt ? 'В долг' : $('fPay').value
-    }
-  };
-
   const btn = $('btnSubmit');
   btn.disabled = true;
   btn.innerHTML = '<span class="spin"></span> Отправка…';
   status($('submitStatus'), '', '');
   try {
-    await apiPost('create', payload);
-    status($('submitStatus'), 'Продажа сохранена ✓', 'ok');
+    // No client-side validation/maths: send raw inputs, let the server decide.
+    const resp = await apiPost('create', { row: collectForm() });
+    status($('submitStatus'), resp.message || 'Сохранено ✓', 'ok');
     toast('Сохранено', 'ok');
-    // сброс (дата/счёт/тип скидки остаются)
-    $('fSku').value = ''; $('fPrice').value = ''; $('fDisc').value = 0;
-    $('fClient').value = ''; $('fQty').value = 1; $('fDebt').checked = false;
-    onToggleDebt(); recalcSum();
+    if (state.session && state.session.form) renderForm(state.session.form);  // reset form
     loadData();
   } catch (err) {
     status($('submitStatus'), describeError(err), 'err');
@@ -244,8 +334,8 @@ async function loadData() {
   btn.innerHTML = '<span class="spin"></span>';
   status($('loadStatus'), '', '');
   try {
-    const data = await apiGet('read');
-    renderData(data.rows || []);
+    const resp = await apiGet('read');
+    renderData(resp.list || { items: [], summary: [] });
   } catch (err) {
     status($('loadStatus'), describeError(err), 'err');
     $('summary').hidden = true;
@@ -255,87 +345,57 @@ async function loadData() {
   }
 }
 
-/* ------------------------------------------------------------
-   6. Отрисовка списка продаж
-------------------------------------------------------------- */
-function renderData(rows) {
-  const list = $('dataList');
-  list.innerHTML = '';
-
-  if (!rows.length) {
-    $('summary').hidden = true;
-    list.innerHTML = '<div class="row-item__empty">Пока нет записей</div>';
-    return;
-  }
-
-  let total = 0;
-  rows.forEach(r => { total += Number(r.sum) || 0; });
-  $('sumCount').textContent = rows.length;
-  $('sumTotal').textContent = fmtMoney(total);
-  $('summary').hidden = false;
-
-  rows.slice().reverse().forEach(r => {
-    const div = document.createElement('div');
-    div.className = 'row-item';
-    const meta = [];
-    if (r.date) meta.push(escapeHtml(formatDate(r.date)));
-    if (r.qty)  meta.push(`${fmtMoney(r.qty)} × ${fmtMoney(r.price)}`);
-    if (r.client)  meta.push(escapeHtml(r.client));
-    if (r.payment) meta.push(escapeHtml(r.payment));
-    div.innerHTML = `
-      <div class="row-item__head">
-        <span class="row-item__name">${escapeHtml(r.name || r.sku || '—')}</span>
-        <span class="row-item__sum">${fmtMoney(r.sum)} ₽</span>
-      </div>
-      <div class="row-item__meta">${meta.map(m => `<span>${m}</span>`).join('')}</div>`;
-    list.appendChild(div);
-  });
-}
-
-function formatDate(d) {
-  if (!d) return '';
-  const s = String(d);
-  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (iso) return `${iso[3]}.${iso[2]}.${iso[1]}`;
-  return s.split('T')[0];
-}
-
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, c => (
-    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
-  ));
-}
-
-/* ------------------------------------------------------------
-   7. Инициализация
-------------------------------------------------------------- */
-function init() {
+/* ============================================================
+   6. BOOTSTRAP
+============================================================ */
+async function init() {
+  // Wire static controls once.
   $('btnLogin').addEventListener('click', doLogin);
   $('tokenInput').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
   $('btnLogout').addEventListener('click', doLogout);
   $('btnSubmit').addEventListener('click', submitData);
   $('btnLoad').addEventListener('click', loadData);
-  $('fSku').addEventListener('change', onPickProduct);
-  $('fDebt').addEventListener('change', onToggleDebt);
-  ['fQty', 'fPrice', 'fDisc', 'fDiscType'].forEach(id =>
-    $(id).addEventListener('input', recalcSum));
 
-  if (getToken()) {
-    apiGet('whoami')
-      .then(data => {
-        products = data.products || [];
-        accounts = data.accounts || [];
-        fillReferences();
-        showApp(data.role);
-        loadData();
-      })
-      .catch(() => { clearToken(); showLogin(); });
-  } else {
-    showLogin();
+  // Register the service worker (relative path → scope = /repo/ on Pages).
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('service-worker.js', { scope: './' }).catch(() => {});
   }
 
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('service-worker.js').catch(() => {});
+  // 1. Resolve the active client from the URL.
+  state.clientId = (qsParam('client') || '').trim();
+  if (!state.clientId) {
+    return showFatal('Откройте ссылку с параметром клиента, например: …/?client=romashka');
+  }
+
+  // 2. Load its public config (configs/<id>.js).
+  try {
+    const cfg = await loadClientConfig(state.clientId);
+    if (!cfg || cfg.id !== state.clientId || !cfg.apiUrl) throw new Error('bad-config');
+    state.config = cfg;
+  } catch (e) {
+    return showFatal('Неизвестный клиент: «' + state.clientId + '». Проверьте ссылку.');
+  }
+
+  // 3. Apply per-client look & PWA identity.
+  applyTheme(state.config.theme);
+  applyManifest(state.config);
+  $('loginClientName').textContent = state.config.name;
+  $('topClientName').textContent = state.config.name;
+  document.title = state.config.name + ' — Salmon';
+
+  // 4. Auto-login if a token for THIS client is already stored.
+  if (getToken()) {
+    try {
+      const session = await apiGet('whoami');
+      showApp();
+      renderSession(session);
+      if ((session.actions || []).indexOf('load') !== -1) loadData();
+    } catch (e) {
+      clearToken();
+      showLogin();
+    }
+  } else {
+    showLogin();
   }
 }
 

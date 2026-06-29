@@ -2,25 +2,36 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <!-- viewport-fit=cover + safe-area для красивого вида на iPhone с "чёлкой" -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
-  <meta name="theme-color" content="#0f766e">
+  <meta name="theme-color" content="#0f766e" id="themeColorMeta">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Salmon">
-  <title>Salmon — Складской учёт</title>
+  <title>Salmon</title>
 
-  <link rel="manifest" href="manifest.json">
+  <!-- Static fallback manifest. app.js replaces it at runtime with a
+       per-client manifest so installed PWAs keep the ?client= param. -->
+  <link rel="manifest" href="manifest.json" id="manifestLink">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-  <!-- ───────── Шапка ───────── -->
+  <!-- Fatal screen: shown when ?client= is missing or unknown.
+       All copy is filled in by app.js. -->
+  <section id="fatalScreen" class="screen fatal" hidden>
+    <div class="card center">
+      <div class="login-logo">🐟</div>
+      <h1 id="fatalTitle">Клиент не найден</h1>
+      <p class="muted" id="fatalText"></p>
+    </div>
+  </section>
+
+  <!-- Top bar (visible only after login) -->
   <header class="topbar" id="topbar" hidden>
     <div class="topbar__title">
       <span class="logo">🐟</span>
-      <span>Salmon</span>
+      <span id="topClientName">Salmon</span>
     </div>
     <div class="topbar__right">
       <span class="role-badge" id="roleBadge"></span>
@@ -30,12 +41,12 @@
 
   <main class="container">
 
-    <!-- ───────── ЭКРАН ВХОДА ───────── -->
-    <section id="loginScreen" class="screen">
+    <!-- ───────── LOGIN ───────── -->
+    <section id="loginScreen" class="screen" hidden>
       <div class="card login-card">
         <div class="login-hero">
           <div class="login-logo">🐟</div>
-          <h1>Salmon</h1>
+          <h1 id="loginClientName">Salmon</h1>
           <p class="muted">Складской учёт и продажи</p>
         </div>
 
@@ -52,91 +63,24 @@
       </div>
     </section>
 
-    <!-- ───────── ЭКРАН ПРИЛОЖЕНИЯ ───────── -->
+    <!-- ───────── APP ───────── -->
     <section id="appScreen" class="screen" hidden>
 
-      <!-- Форма ввода продажи (только для admin) -->
+      <!-- Form card. Built entirely from the server's form schema. -->
       <div class="card" id="formCard" hidden>
-        <h2 class="card__title">Новая продажа</h2>
-
-        <div class="grid2">
-          <label class="field">
-            <span class="field__label">Дата</span>
-            <input type="date" id="fDate">
-          </label>
-          <label class="field">
-            <span class="field__label">Кол-во</span>
-            <input type="number" id="fQty" inputmode="decimal" min="0" step="any" value="1">
-          </label>
-        </div>
-
-        <label class="field">
-          <span class="field__label">Товар</span>
-          <select id="fSku"><option value="">— выберите товар —</option></select>
-        </label>
-
-        <div class="grid3">
-          <label class="field">
-            <span class="field__label">Цена</span>
-            <input type="number" id="fPrice" inputmode="decimal" min="0" step="any" placeholder="0">
-          </label>
-          <label class="field">
-            <span class="field__label">Скидка</span>
-            <input type="number" id="fDisc" inputmode="decimal" min="0" step="any" value="0">
-          </label>
-          <label class="field">
-            <span class="field__label">Тип</span>
-            <select id="fDiscType">
-              <option value="Сумма">сум</option>
-              <option value="%">%</option>
-            </select>
-          </label>
-        </div>
-
-        <div class="sum-row">
-          <span>Итого к оплате</span>
-          <span class="sum-row__val"><span id="fSum">0</span> ₽</span>
-        </div>
-
-        <label class="field">
-          <span class="field__label">Клиент</span>
-          <input type="text" id="fClient" placeholder="Розничный покупатель" list="clientList">
-          <datalist id="clientList"></datalist>
-        </label>
-
-        <label class="toggle">
-          <input type="checkbox" id="fDebt">
-          <span class="toggle__track"><span class="toggle__thumb"></span></span>
-          <span>Продажа в долг</span>
-        </label>
-
-        <label class="field" id="payField">
-          <span class="field__label">Оплата на счёт</span>
-          <select id="fPay"></select>
-        </label>
-
+        <h2 class="card__title" id="formTitle">Форма</h2>
+        <div id="formFields"><!-- fields injected by app.js --></div>
         <button class="btn btn--primary" id="btnSubmit">Отправить</button>
         <p class="status" id="submitStatus" hidden></p>
       </div>
 
-      <!-- Блок данных (обе роли) -->
-      <div class="card">
+      <!-- Data card. Columns/rows/summary come pre-formatted from server. -->
+      <div class="card" id="dataCard" hidden>
         <div class="card__head">
-          <h2 class="card__title">Продажи</h2>
+          <h2 class="card__title" id="dataTitle">Данные</h2>
           <button class="btn btn--ghost" id="btnLoad">Загрузить</button>
         </div>
-
-        <div class="summary" id="summary" hidden>
-          <div class="summary__item">
-            <span class="summary__val" id="sumCount">0</span>
-            <span class="summary__lbl">записей</span>
-          </div>
-          <div class="summary__item">
-            <span class="summary__val" id="sumTotal">0</span>
-            <span class="summary__lbl">выручка</span>
-          </div>
-        </div>
-
+        <div class="summary" id="summary" hidden></div>
         <p class="status" id="loadStatus" hidden></p>
         <div id="dataList" class="data-list"></div>
       </div>
@@ -144,9 +88,9 @@
     </section>
   </main>
 
-  <!-- Лёгкий тост для уведомлений -->
   <div id="toast" class="toast" hidden></div>
 
+  <!-- Single, client-agnostic application script -->
   <script src="app.js"></script>
 </body>
 </html>

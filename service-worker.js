@@ -1,16 +1,19 @@
 /* ============================================================
-   Salmon — Service Worker (офлайн-кэш статики для PWA)
-   ============================================================
-   Стратегия:
-   - Статика (html/css/js/иконки) → cache-first.
-   - Запросы к Apps Script (script.google.com) → НЕ кэшируем,
-     всегда идём в сеть (данные должны быть свежими).
-   При обновлении файлов поднимите версию CACHE — старый кэш
-   будет удалён.
-------------------------------------------------------------- */
+   Salmon — Service Worker (offline shell for the PWA)
+   ------------------------------------------------------------
+   All paths are RELATIVE so the worker works under a GitHub Pages
+   project subpath (username.github.io/<repo>/).
+   Strategy:
+     - App shell (html/css/js/icons) → cache-first.
+     - configs/*  → network-first (so apiUrl/theme edits propagate;
+                    falls back to cache when offline).
+     - Apps Script requests + non-GET → straight to network.
+   Bump CACHE when you change shell files to drop the old cache.
+============================================================ */
 
-const CACHE = 'salmon-v1';
+const CACHE = 'salmon-v2';
 
+// Relative URLs — resolved against the worker's scope (the repo dir).
 const ASSETS = [
   './',
   './index.html',
@@ -21,15 +24,11 @@ const ASSETS = [
   './icons/icon-512.png'
 ];
 
-// Установка — кладём статику в кэш
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE).then((cache) => cache.addAll(ASSETS))
-  );
+  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)));
   self.skipWaiting();
 });
 
-// Активация — чистим старые версии кэша
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
@@ -39,28 +38,33 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Перехват запросов
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   const url = new URL(req.url);
 
-  // Запросы к бэкенду (Apps Script) — всегда сеть, мимо кэша
-  if (url.hostname.includes('script.google') || req.method !== 'GET') {
-    return; // браузер обработает сам
+  // Backend calls and writes: never cache.
+  if (url.hostname.includes('script.google') || req.method !== 'GET') return;
+
+  // Client configs: network-first, cache as fallback.
+  if (url.pathname.includes('/configs/')) {
+    event.respondWith(
+      fetch(req).then((res) => {
+        const copy = res.clone();
+        caches.open(CACHE).then((c) => c.put(req, copy));
+        return res;
+      }).catch(() => caches.match(req))
+    );
+    return;
   }
 
-  // Статика: сначала кэш, потом сеть
+  // App shell: cache-first.
   event.respondWith(
-    caches.match(req).then((cached) => {
-      if (cached) return cached;
-      return fetch(req).then((res) => {
-        // кладём в кэш только успешные ответы того же origin
-        if (res.ok && url.origin === self.location.origin) {
-          const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put(req, copy));
-        }
-        return res;
-      }).catch(() => cached);
-    })
+    caches.match(req).then((cached) => cached || fetch(req).then((res) => {
+      if (res.ok && url.origin === self.location.origin) {
+        const copy = res.clone();
+        caches.open(CACHE).then((c) => c.put(req, copy));
+      }
+      return res;
+    }).catch(() => cached))
   );
 });
