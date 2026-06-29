@@ -35,13 +35,25 @@
 
   <!-- Top bar (visible after login) -->
   <header class="topbar" id="topbar" hidden>
-    <div class="topbar__title">
-      <span class="logo">🐟</span>
-      <span id="topTitle">Salmon</span>
+    <div class="topbar__left">
+      <!-- Выход — в левом краю. -->
+      <button class="btn-icon" id="btnLogout" title="Выйти" aria-label="Выйти">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+      </button>
+      <!-- Имя пользователя (роль), обрезается до 9 символов. -->
+      <span class="topbar__user" id="topUser"></span>
     </div>
     <div class="topbar__right">
-      <span class="role-badge" id="roleBadge"></span>
-      <button class="btn-icon" id="btnLogout" title="Выйти" aria-label="Выйти">⎋</button>
+      <!-- Валюта / счёт оплаты: выбирается один раз здесь. -->
+      <div class="paywrap">
+        <button class="btn-pay" id="btnPayment" hidden aria-haspopup="true" aria-label="Валюта / счёт оплаты">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="3"/><path d="M2 10h20"/></svg>
+          <span id="payLabel">—</span>
+        </button>
+        <div class="menu" id="payMenu" hidden></div>
+      </div>
+      <!-- Оплатить: оформляет продажу/приход. Виден только на Продать/Купить. -->
+      <button class="btn-pay btn-pay--go" id="btnHeaderPay" hidden>Оплатить</button>
     </div>
   </header>
 
@@ -82,7 +94,6 @@
                  autocapitalize="off" spellcheck="false" placeholder="Сканируйте или начните вводить…">
         </label>
         <div id="sellResults" class="search-results" hidden></div>
-        <div id="sellEntry" class="entry" hidden></div>
       </div>
 
       <div class="card" id="sellCartCard">
@@ -91,11 +102,9 @@
 
         <label class="field">
           <span class="field__label">Клиент</span>
-          <input type="text" id="sellClient" autocomplete="off" placeholder="Розничный покупатель">
-        </label>
-        <label class="field">
-          <span class="field__label">Оплата</span>
-          <select id="sellPayment"></select>
+          <input type="text" id="sellClient" list="clientList" autocomplete="off"
+                 autocapitalize="off" placeholder="Розничный покупатель">
+          <datalist id="clientList"></datalist>
         </label>
 
         <div class="sum-row">
@@ -116,7 +125,6 @@
                  autocapitalize="off" spellcheck="false" placeholder="Найдите товар для прихода…">
         </label>
         <div id="buyResults" class="search-results" hidden></div>
-        <div id="buyEntry" class="entry" hidden></div>
       </div>
 
       <div class="card" id="buyCartCard">
@@ -127,10 +135,6 @@
           <span class="field__label">Поставщик</span>
           <input type="text" id="buySupplier" autocomplete="off" list="supplierList" placeholder="Поставщик">
           <datalist id="supplierList"></datalist>
-        </label>
-        <label class="field">
-          <span class="field__label">Оплата</span>
-          <select id="buyPayment"></select>
         </label>
 
         <div class="sum-row">
@@ -149,6 +153,9 @@
           <h2 class="card__title" id="dataTitle">Данные</h2>
           <button class="btn btn--ghost" id="btnReload">↻</button>
         </div>
+        <!-- Tools for specific data screens (e.g. «Погашение кредита» in Касса).
+             Built by app.js only for the cash module. -->
+        <div id="dataTools" class="data-tools" hidden></div>
         <div class="summary" id="dataSummary" hidden></div>
         <p class="status" id="dataStatus" hidden></p>
         <div id="dataList" class="data-list"></div>
