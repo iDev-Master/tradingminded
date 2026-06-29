@@ -527,6 +527,11 @@ input.field--required { border-color: var(--warn); }
 }
 .repay .field:last-of-type { margin-bottom: 12px; }
 .repay__debt { margin: -6px 0 12px; color: var(--warn); }
+.repay__amount { display: flex; gap: 8px; }
+.repay__amount input { flex: 1; min-width: 0; }
+.repay__full { width: auto; flex: none; padding: 0 14px; font-size: 14px; white-space: nowrap; }
+.repay__left { margin: -4px 0 12px; color: var(--accent-2); }
+.repay__left--err { color: var(--danger); }
 
 /* ───────── Строки корзины (инлайн-редактирование) ───────── */
 .cart-row {

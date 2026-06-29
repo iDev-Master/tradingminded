@@ -695,8 +695,12 @@ function renderCashTools() {
         '<input type="text" id="repayClient" list="debtorList" autocomplete="off" placeholder="Выберите должника"></label>' +
       '<datalist id="debtorList"></datalist>' +
       '<p class="muted small repay__debt" id="repayDebt" hidden></p>' +
-      '<label class="field"><span class="field__label">Сумма погашения</span>' +
-        '<input type="text" id="repayAmount" inputmode="decimal" placeholder="Сумма"></label>' +
+      '<label class="field"><span class="field__label">Сумма погашения <span class="muted">(можно частично)</span></span>' +
+        '<div class="repay__amount">' +
+          '<input type="text" id="repayAmount" inputmode="decimal" placeholder="Сумма">' +
+          '<button class="btn btn--soft repay__full" id="btnRepayFull" type="button">Весь долг</button>' +
+        '</div></label>' +
+      '<p class="small repay__left" id="repayLeft" hidden></p>' +
       '<button class="btn btn--primary" id="btnRepaySubmit" type="button">Оформить ПКО</button>' +
       '<p class="status" id="repayStatus" hidden></p>' +
     '</div>';
@@ -708,17 +712,43 @@ function renderCashTools() {
       .join('');
   }).catch(() => {});
 
+  // Currently selected debtor (or null) — drives the debt cap and "remaining".
+  const debtor = () => (state.debtors || []).find(d => d.name === $('repayClient').value.trim()) || null;
+
+  // Live hint: how much debt is left after this (partial) payment, and a guard
+  // against paying more than is owed.
+  function updateLeft() {
+    const d = debtor();
+    const amt = num($('repayAmount').value);
+    const el = $('repayLeft');
+    if (!d || !amt) { el.hidden = true; return; }
+    if (amt > d.debt + 0.001) {
+      el.textContent = 'Больше долга — максимум ' + money(d.debt) + ' ' + cur();
+      el.classList.add('repay__left--err');
+    } else {
+      el.textContent = 'Останется долг: ' + money(Math.max(0, d.debt - amt)) + ' ' + cur();
+      el.classList.remove('repay__left--err');
+    }
+    el.hidden = false;
+  }
+
   $('btnRepayToggle').onclick = () => { $('repayForm').hidden = !$('repayForm').hidden; };
   $('repayClient').oninput = () => {
-    const c = (state.debtors || []).find(d => d.name === $('repayClient').value.trim());
+    const d = debtor();
     const el = $('repayDebt');
-    if (c) {
-      el.textContent = 'Остаток долга: ' + money(c.debt) + ' ' + cur();
+    if (d) {
+      el.textContent = 'Остаток долга: ' + money(d.debt) + ' ' + cur();
       el.hidden = false;
-      if (!$('repayAmount').value) $('repayAmount').value = c.debt;   // default = full debt
+      if (!$('repayAmount').value) $('repayAmount').value = d.debt;   // default = весь долг (можно уменьшить)
     } else {
       el.hidden = true;
     }
+    updateLeft();
+  };
+  $('repayAmount').oninput = updateLeft;
+  $('btnRepayFull').onclick = () => {
+    const d = debtor();
+    if (d) { $('repayAmount').value = d.debt; updateLeft(); $('repayAmount').focus(); }
   };
   $('btnRepaySubmit').onclick = submitRepay;
 }
@@ -726,8 +756,13 @@ function renderCashTools() {
 async function submitRepay() {
   const client = $('repayClient').value.trim();
   const amount = Math.max(0, num($('repayAmount').value));
+  const debtor = (state.debtors || []).find(d => d.name === client) || null;
   if (!client)        { status($('repayStatus'), 'Выберите клиента-должника.', 'err'); return; }
   if (!(amount > 0))  { status($('repayStatus'), 'Введите сумму погашения.', 'err'); return; }
+  if (debtor && amount > debtor.debt + 0.001) {
+    status($('repayStatus'), 'Сумма больше долга. Максимум — ' + money(debtor.debt) + ' ' + cur() + '.', 'err');
+    return;
+  }
 
   const btn = $('btnRepaySubmit');
   btn.disabled = true;
