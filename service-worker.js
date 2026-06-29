@@ -11,7 +11,7 @@
    Bump CACHE when you change shell files to drop the old cache.
 ============================================================ */
 
-const CACHE = 'salmon-v6';
+const CACHE = 'salmon-v7';
 
 // Relative URLs — resolved against the worker's scope (the repo dir).
 const ASSETS = [
