@@ -213,7 +213,7 @@ select {
   padding: 12px;
   text-align: center;
 }
-.summary__val { display: block; font-size: 20px; font-weight: 700; color: var(--accent-2); }
+.summary__val { display: block; font-size: clamp(15px, 4.6vw, 20px); font-weight: 700; color: var(--accent-2); line-height: 1.2; }
 .summary__lbl { display: block; font-size: 12px; color: var(--muted); }
 
 /* ───────── Список данных ───────── */
@@ -305,4 +305,170 @@ select {
   animation: rot .7s linear infinite;
   vertical-align: -3px;
 }
+.spin--dark { border-color: rgba(148,163,184,.35); border-top-color: var(--accent-2); }
 @keyframes rot { to { transform: rotate(360deg); } }
+
+/* ───────── Назад в шапке ───────── */
+.btn-icon#btnBack { font-size: 26px; line-height: 1; }
+
+/* ───────── Главный экран: сетка кнопок ───────── */
+.home-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-top: 6px;
+}
+.home-btn {
+  aspect-ratio: 1 / 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  color: var(--text);
+  cursor: pointer;
+  transition: transform .08s, border-color .15s, background .15s;
+}
+.home-btn:active { transform: scale(.97); }
+.home-btn:hover { border-color: var(--accent-2); }
+.home-btn__icon { font-size: 40px; line-height: 1; }
+.home-btn__label { font-size: 16px; font-weight: 600; }
+/* Полноширинная кнопка (Дашборды) */
+.home-btn--full {
+  grid-column: 1 / -1;
+  aspect-ratio: auto;
+  flex-direction: row;
+  gap: 14px;
+  padding: 22px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  border: none;
+  color: #fff;
+}
+.home-btn--full .home-btn__icon { font-size: 30px; }
+
+/* ───────── Поиск товаров ───────── */
+.search-results {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.result {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  text-align: left;
+  width: 100%;
+  background: var(--bg-3);
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 10px 12px;
+  color: var(--text);
+  cursor: pointer;
+}
+.result:active { transform: scale(.99); }
+.result:hover { border-color: var(--accent-2); }
+.result__name { font-weight: 600; font-size: 15px; }
+.result__meta { font-size: 12px; color: var(--muted); }
+
+/* ───────── Корзина ───────── */
+.pill {
+  display: inline-block;
+  min-width: 22px;
+  padding: 1px 8px;
+  margin-left: 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+  vertical-align: middle;
+}
+.cart { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
+.cart-item {
+  background: var(--bg-3);
+  border-radius: 12px;
+  padding: 12px;
+  animation: fade .15s ease;
+}
+.cart-item__top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.cart-item__name { font-weight: 600; }
+.cart-item__del {
+  flex: none;
+  width: 28px; height: 28px;
+  border: none; border-radius: 8px;
+  background: rgba(239,68,68,.16); color: #fca5a5;
+  font-size: 18px; line-height: 1; cursor: pointer;
+}
+.cart-item__sku { margin: 2px 0 10px; }
+.cart-item__controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.cart-item__sum {
+  margin-left: auto;
+  font-weight: 700;
+  color: var(--accent-2);
+  white-space: nowrap;
+}
+.cart-item__sum--right { display: block; text-align: right; margin-top: 8px; }
+
+/* Степпер количества */
+.stepper { display: flex; align-items: center; gap: 0; flex: none; }
+.stepper button {
+  width: 34px; height: 38px;
+  border: none;
+  background: var(--bg-2);
+  color: var(--text);
+  font-size: 20px; line-height: 1;
+  cursor: pointer;
+}
+.stepper button:first-child { border-radius: 9px 0 0 9px; }
+.stepper button:last-child  { border-radius: 0 9px 9px 0; }
+.stepper .qty {
+  width: 48px;
+  height: 38px;
+  text-align: center;
+  padding: 0;
+  border-radius: 0;
+  background: var(--bg-2);
+}
+
+/* Поле цены внутри строки корзины */
+.price-field { display: flex; flex-direction: column; gap: 2px; }
+.price-field > span { font-size: 11px; color: var(--muted); }
+.price-field input {
+  width: 92px;
+  height: 38px;
+  padding: 0 10px;
+  background: var(--bg-2);
+}
+
+/* Цвета статуса остатка в списках */
+.amount--danger { color: #fca5a5 !important; }
+.amount--warn   { color: var(--warn) !important; }
+
+/* ───────── Дашборд ───────── */
+.dash-section {
+  background: var(--bg-3);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+.dash-section__title {
+  font-size: 12px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+.dash-row {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+  padding: 6px 0;
+  border-top: 1px solid rgba(148,163,184,.12);
+}
+.dash-row:first-of-type { border-top: none; }
+.dash-row b { color: var(--accent-2); white-space: nowrap; }

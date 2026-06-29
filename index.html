@@ -17,8 +17,7 @@
 </head>
 <body>
 
-  <!-- Fatal screen: shown when ?client= is missing or unknown.
-       All copy is filled in by app.js. -->
+  <!-- Fatal screen: shown when ?client= is missing or unknown. -->
   <section id="fatalScreen" class="screen fatal" hidden>
     <div class="card center">
       <div class="login-logo">🐟</div>
@@ -27,11 +26,12 @@
     </div>
   </section>
 
-  <!-- Top bar (visible only after login) -->
+  <!-- Top bar (visible after login) -->
   <header class="topbar" id="topbar" hidden>
+    <button class="btn-icon" id="btnBack" title="Назад" aria-label="Назад" hidden>‹</button>
     <div class="topbar__title">
       <span class="logo">🐟</span>
-      <span id="topClientName">Salmon</span>
+      <span id="topTitle">Salmon</span>
     </div>
     <div class="topbar__right">
       <span class="role-badge" id="roleBadge"></span>
@@ -63,29 +63,91 @@
       </div>
     </section>
 
-    <!-- ───────── APP ───────── -->
-    <section id="appScreen" class="screen" hidden>
+    <!-- ───────── HOME (button grid) ───────── -->
+    <section id="homeScreen" class="screen" hidden>
+      <div class="home-grid" id="homeGrid"><!-- buttons injected by app.js --></div>
+    </section>
 
-      <!-- Form card. Built entirely from the server's form schema. -->
-      <div class="card" id="formCard" hidden>
-        <h2 class="card__title" id="formTitle">Форма</h2>
-        <div id="formFields"><!-- fields injected by app.js --></div>
-        <button class="btn btn--primary" id="btnSubmit">Отправить</button>
-        <p class="status" id="submitStatus" hidden></p>
+    <!-- ───────── ПРОДАТЬ ───────── -->
+    <section id="sellScreen" class="screen" hidden>
+      <div class="card">
+        <label class="field" style="margin-bottom:8px">
+          <span class="field__label">Штрихкод / артикул / название</span>
+          <input type="text" id="sellSearch" inputmode="search" autocomplete="off"
+                 autocapitalize="off" spellcheck="false" placeholder="Сканируйте или начните вводить…">
+        </label>
+        <div id="sellResults" class="search-results" hidden></div>
       </div>
 
-      <!-- Data card. Columns/rows/summary come pre-formatted from server. -->
-      <div class="card" id="dataCard" hidden>
+      <div class="card" id="sellCartCard">
+        <h2 class="card__title">Корзина <span class="pill" id="sellCount">0</span></h2>
+        <div id="sellCart" class="cart"></div>
+
+        <label class="field">
+          <span class="field__label">Клиент</span>
+          <input type="text" id="sellClient" autocomplete="off" placeholder="Розничный покупатель">
+        </label>
+        <label class="field">
+          <span class="field__label">Оплата</span>
+          <select id="sellPayment"></select>
+        </label>
+
+        <div class="sum-row">
+          <span>Итого</span>
+          <span class="sum-row__val" id="sellTotal">0,00</span>
+        </div>
+        <button class="btn btn--primary" id="btnSellSubmit">Сохранить продажу</button>
+        <p class="status" id="sellStatus" hidden></p>
+      </div>
+    </section>
+
+    <!-- ───────── КУПИТЬ (приход) ───────── -->
+    <section id="buyScreen" class="screen" hidden>
+      <div class="card">
+        <label class="field" style="margin-bottom:8px">
+          <span class="field__label">Штрихкод / артикул / название</span>
+          <input type="text" id="buySearch" inputmode="search" autocomplete="off"
+                 autocapitalize="off" spellcheck="false" placeholder="Найдите товар для прихода…">
+        </label>
+        <div id="buyResults" class="search-results" hidden></div>
+      </div>
+
+      <div class="card" id="buyCartCard">
+        <h2 class="card__title">Приход <span class="pill" id="buyCount">0</span></h2>
+        <div id="buyCart" class="cart"></div>
+
+        <label class="field">
+          <span class="field__label">Поставщик</span>
+          <input type="text" id="buySupplier" autocomplete="off" list="supplierList" placeholder="Поставщик">
+          <datalist id="supplierList"></datalist>
+        </label>
+        <label class="field">
+          <span class="field__label">Оплата</span>
+          <select id="buyPayment"></select>
+        </label>
+
+        <div class="sum-row">
+          <span>Итого приход</span>
+          <span class="sum-row__val" id="buyTotal">0,00</span>
+        </div>
+        <button class="btn btn--primary" id="btnBuySubmit">Сохранить приход</button>
+        <p class="status" id="buyStatus" hidden></p>
+      </div>
+    </section>
+
+    <!-- ───────── Generic data screen (Касса / Склад / Дашборды / История) ───────── -->
+    <section id="dataScreen" class="screen" hidden>
+      <div class="card">
         <div class="card__head">
           <h2 class="card__title" id="dataTitle">Данные</h2>
-          <button class="btn btn--ghost" id="btnLoad">Загрузить</button>
+          <button class="btn btn--ghost" id="btnReload">↻</button>
         </div>
-        <div class="summary" id="summary" hidden></div>
-        <p class="status" id="loadStatus" hidden></p>
+        <div class="summary" id="dataSummary" hidden></div>
+        <p class="status" id="dataStatus" hidden></p>
         <div id="dataList" class="data-list"></div>
       </div>
-
     </section>
+
   </main>
 
   <!-- Install button: shown only when the browser fires
