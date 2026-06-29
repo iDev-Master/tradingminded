@@ -73,6 +73,18 @@ const MODULES = {
 };
 const MODULE_ORDER = ['sell', 'buy', 'cash', 'stock', 'dash'];
 
+// Single-colour line icons (inherit the tab colour) — consistent with the
+// theme, unlike the multicolour emoji that ignored the active state.
+const SVG = (paths) => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+  'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + paths + '</svg>';
+const MODULE_ICONS = {
+  sell:  SVG('<circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>'),
+  buy:   SVG('<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.27 6.96 12 12.01l8.73-5.05"/><path d="M12 22.08V12"/>'),
+  cash:  SVG('<path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/>'),
+  stock: SVG('<path d="M20.59 13.41 13.42 20.6a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/>'),
+  dash:  SVG('<line x1="6" y1="20" x2="6" y2="14"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="18" y1="20" x2="18" y2="10"/>')
+};
+
 /* ------------------------------------------------------------
    Global state
 ------------------------------------------------------------- */
@@ -82,9 +94,14 @@ const state = {
   session: null,    // whoami: {role, modules, currency}
   catalog: null,    // {products, payments, suppliers}
   cart: { sell: [], buy: [] },
-  reloadData: null,     // re-fetch fn for the active data screen
-  installAvailable: false   // PWA install offer (mobile, not yet installed)
+  reloadData: null,         // re-fetch fn for the active data screen
+  installAvailable: false,  // PWA install offer (mobile, not yet installed)
+  payments: [],             // available payment/currency options (from catalog)
+  payment: null,            // currently selected one (set via the header switcher)
+  debtors: []               // clients with outstanding debt (for «Погашение кредита»)
 };
+
+const paymentKey = () => 'salmon_payment_' + state.clientId;   // remembered payment/currency choice
 
 const tokenKey = () => 'salmon_token_' + state.clientId;       // active session token (drives auto-login)
 const getToken = () => localStorage.getItem(tokenKey()) || '';
@@ -203,6 +220,8 @@ function showFatal(text) {
 function showLogin() {
   $('topbar').hidden = true;
   $('tabbar').hidden = true;
+  $('btnPayment').hidden = true;
+  closePayMenu();
   hideScreens();
   $('loginScreen').hidden = false;
   // Pre-fill the last-used token so the user can sign in with one tap.
@@ -210,12 +229,13 @@ function showLogin() {
   refreshInstallBtn();
 }
 
-// Show a single module screen and set the topbar title.
+// Show a single module screen. The header "Оплатить" button is only
+// meaningful where there's a cart to submit (Продать / Купить).
 function showScreen(id, title) {
   hideScreens();
   $('topbar').hidden = false;
   $(id).hidden = false;
-  $('topTitle').textContent = title || state.config.name;
+  $('btnHeaderPay').hidden = !(id === 'sellScreen' || id === 'buyScreen');
   refreshInstallBtn();
 }
 
@@ -230,9 +250,11 @@ function refreshInstallBtn() {
    4. BOTTOM TAB BAR (primary navigation)
 ============================================================ */
 function renderTabs(session) {
-  const badge = $('roleBadge');
-  badge.textContent = session.role || '';
-  badge.className = 'role-badge ' + (session.role === 'admin' ? 'admin' : 'viewer');
+  // Header shows the user's name (falls back to role); trimmed to 9 chars + …
+  const who = (session.name || session.role || '').trim();
+  const user = $('topUser');
+  user.textContent = who.length > 9 ? who.slice(0, 9) + '…' : who;
+  user.title = who;
 
   const allowed = (session.modules || []).filter(k => MODULES[k]);
   const bar = $('tabbar');
@@ -242,7 +264,7 @@ function renderTabs(session) {
     const b = document.createElement('button');
     b.className = 'tab';
     b.dataset.key = k;
-    b.innerHTML = '<span class="tab__icon">' + m.icon + '</span>' +
+    b.innerHTML = '<span class="tab__icon">' + (MODULE_ICONS[k] || m.icon) + '</span>' +
                   '<span class="tab__label">' + escapeHtml(m.label) + '</span>';
     b.addEventListener('click', () => activate(k));
     bar.appendChild(b);
@@ -272,7 +294,7 @@ function activate(key) {
 async function ensureCatalog() {
   if (state.catalog) return state.catalog;
   const resp = await apiGet('catalog');
-  state.catalog = resp.catalog || { products: [], payments: [], suppliers: [] };
+  state.catalog = resp.catalog || { products: [], payments: [], suppliers: [], clients: [] };
   return state.catalog;
 }
 
@@ -283,6 +305,55 @@ function fillSelect(sel, values, fallback) {
     o.value = v; o.textContent = v;
     sel.appendChild(o);
   });
+}
+
+/* ------------------------------------------------------------
+   PAYMENT / CURRENCY SWITCHER (in the header)
+   Chosen once from the top bar instead of a select at the bottom of
+   every sale/purchase. Options come from the catalog (the Excel
+   reference); the choice is remembered per client.
+------------------------------------------------------------- */
+function buildPaymentMenu(payments) {
+  state.payments = (payments && payments.length) ? payments : ['Касса', 'В долг'];
+  const stored = localStorage.getItem(paymentKey());
+  if (!state.payment || state.payments.indexOf(state.payment) === -1) {
+    state.payment = (stored && state.payments.indexOf(stored) !== -1) ? stored : state.payments[0];
+  }
+  renderPaymentMenu();
+  $('payLabel').textContent = state.payment;
+  $('btnPayment').hidden = false;
+}
+
+function renderPaymentMenu() {
+  const menu = $('payMenu');
+  menu.innerHTML = state.payments.map(p =>
+    '<button type="button" class="menu__item' + (p === state.payment ? ' menu__item--on' : '') +
+    '" data-pay="' + escapeHtml(p) + '">' + escapeHtml(p) + '</button>'
+  ).join('');
+  menu.querySelectorAll('[data-pay]').forEach(b => b.onclick = () => {
+    state.payment = b.dataset.pay;
+    localStorage.setItem(paymentKey(), state.payment);
+    $('payLabel').textContent = state.payment;
+    renderPaymentMenu();
+    closePayMenu();
+    if (!$('sellScreen').hidden) updateSellClientUI();
+    toast('Оплата: ' + state.payment, 'ok');
+  });
+}
+
+function closePayMenu() { $('payMenu').hidden = true; }
+
+// A payment counts as "credit" (sale on debt) when its name says so. The
+// credit option in the Excel reference must be named like «В долг»/«Кредит».
+function isCreditPayment(p) { return /долг|кредит|credit/i.test(p || ''); }
+
+// Reflect on the Продать screen whether a client is required right now
+// (only for credit payments). The actual block happens on submit.
+function updateSellClientUI() {
+  const credit = isCreditPayment(state.payment);
+  const inp = $('sellClient');
+  inp.placeholder = credit ? 'Клиент (обязателен для долга)' : 'Розничный покупатель';
+  inp.classList.toggle('field--required', credit);
 }
 
 // Filter products by barcode/article/name. Returns up to `limit` matches.
@@ -329,7 +400,10 @@ function openSell() {
   status($('sellStatus'), '', '');
   ensureCatalog()
     .then(cat => {
-      fillSelect($('sellPayment'), cat.payments, ['Касса', 'В долг']);
+      buildPaymentMenu(cat.payments);
+      $('clientList').innerHTML = (cat.clients || [])
+        .map(c => '<option value="' + escapeHtml(c.name) + '">').join('');
+      updateSellClientUI();
       renderSellCart();
       const s = $('sellSearch');
       s.value = '';
@@ -341,14 +415,14 @@ function openSell() {
 
 function onSellSearch() {
   const q = $('sellSearch').value;
-  renderResults($('sellResults'), searchProducts(q, 8), p => openEntry('sell', p));
+  renderResults($('sellResults'), searchProducts(q, 8), p => addToCart('sell', p));
 }
 
 function onSellEnter() {
   const q = $('sellSearch').value.trim();
   if (!q) return;
   const exact = exactProduct(q) || (searchProducts(q, 2).length === 1 ? searchProducts(q, 1)[0] : null);
-  if (exact) openEntry('sell', exact);
+  if (exact) addToCart('sell', exact);
   else toast('Товар не найден', 'err');
 }
 
@@ -364,18 +438,18 @@ function renderSellCart() {
   } else {
     box.innerHTML = cart.map((it, i) =>
       '<div class="cart-row">' +
-        '<button class="cart-row__tap" data-edit="' + i + '" type="button">' +
+        '<div class="cart-row__top">' +
           '<span class="cart-row__name">' + escapeHtml(it.name) + '</span>' +
-          '<span class="cart-row__calc">' + qtyStr(it.qty) + ' × ' + money(it.price) + '</span>' +
-        '</button>' +
-        '<span class="cart-row__sum">' + money(it.qty * it.price) + '</span>' +
-        '<button class="cart-row__del" data-del="' + i + '" type="button" aria-label="Удалить">×</button>' +
+          '<button class="cart-row__del" data-del="' + i + '" type="button" aria-label="Удалить">×</button>' +
+        '</div>' +
+        '<div class="cart-row__controls">' +
+          stepperHTML(i, it.qty) +
+          priceFieldHTML('price', i, it.price, 'Цена') +
+          '<span class="cart-row__sum" data-sum="' + i + '">' + money(it.qty * it.price) + '</span>' +
+        '</div>' +
       '</div>'
     ).join('');
-    box.querySelectorAll('[data-edit]').forEach(b => b.onclick =
-      () => openEntry('sell', state.cart.sell[+b.dataset.edit], +b.dataset.edit));
-    box.querySelectorAll('[data-del]').forEach(b => b.onclick =
-      () => { state.cart.sell.splice(+b.dataset.del, 1); renderSellCart(); });
+    bindCart('sell');
   }
   $('sellTotal').textContent = money(cartTotal('sell')) + ' ' + cur();
 }
@@ -386,114 +460,96 @@ function cartTotal(kind) {
 }
 
 /* ------------------------------------------------------------
-   QUICK-ENTRY PANEL (shared by Продать / Купить)
-   Tap a search result OR a cart row → set qty + price here, then
-   add/save. No hunting for the line in the cart afterwards.
+   ADD TO CART + INLINE EDITING (shared by Продать / Купить)
+   One tap on a search result (or Enter on an exact match) adds the
+   item immediately: qty 1, prices pulled from the catalog. Quantity
+   and price are then edited right inside the cart row — no separate
+   panel, no second step, no hunting for the line afterwards. Tapping
+   the same product again just bumps its quantity by one.
 ------------------------------------------------------------- */
-let entry = null;   // { kind, index|null, product }
-
-function openEntry(kind, product, index) {
-  entry = { kind: kind, index: (index == null ? null : index), product: product };
-  const isSell = kind === 'sell';
-  const panel = $(isSell ? 'sellEntry' : 'buyEntry');
-  $(isSell ? 'sellResults' : 'buyResults').hidden = true;
-  $(isSell ? 'sellSearch' : 'buySearch').value = '';
-
-  let qty = 1, price = product.price || 0, cost = product.cost || 0, sale = product.price || 0;
-  if (index != null) {
-    const it = state.cart[kind][index];
-    qty = it.qty;
-    if (isSell) price = it.price; else { cost = it.costPrice; sale = it.salePrice; }
+function addToCart(kind, product) {
+  const cart = state.cart[kind];
+  const ex = cart.findIndex(i => i.sku === product.sku);
+  if (ex >= 0) {
+    cart[ex].qty = num(cart[ex].qty) + 1;            // already in cart → +1
+  } else if (kind === 'sell') {
+    cart.push({ sku: product.sku, name: product.name, unit: product.unit,
+                stock: product.stock, qty: 1, price: num(product.price) });
+  } else {
+    cart.push({ sku: product.sku, name: product.name, unit: product.unit, stock: product.stock,
+                qty: 1, costPrice: num(product.cost), salePrice: num(product.price) });
   }
-
-  const head =
-    '<div class="entry__head"><span class="entry__name">' + escapeHtml(product.name) + '</span>' +
-    '<button class="entry__close" id="entryClose" type="button" aria-label="Закрыть">×</button></div>' +
-    '<div class="muted small entry__sku">' + escapeHtml(product.sku) + ' · ост: ' + product.stock + '</div>';
-
-  const qtyBlock =
-    '<div class="field"><span class="field__label">Количество</span>' +
-      '<div class="stepper stepper--lg">' +
-        '<button id="entryDec" type="button">−</button>' +
-        '<input id="entryQty" inputmode="decimal" value="' + qty + '">' +
-        '<button id="entryInc" type="button">+</button>' +
-      '</div></div>';
-
-  const priceBlock = isSell
-    ? '<div class="field"><span class="field__label">Цена за ед.</span>' +
-        '<input id="entryPrice" inputmode="decimal" value="' + (price || '') + '" placeholder="0"></div>'
-    : '<div class="grid2">' +
-        '<div class="field"><span class="field__label">Цена прихода</span>' +
-          '<input id="entryCost" inputmode="decimal" value="' + (cost || '') + '" placeholder="0"></div>' +
-        '<div class="field"><span class="field__label">Цена продажи</span>' +
-          '<input id="entrySale" inputmode="decimal" value="' + (sale || '') + '" placeholder="0"></div>' +
-      '</div>';
-
-  panel.innerHTML = head + qtyBlock + priceBlock +
-    '<div class="sum-row"><span>Сумма</span><span class="sum-row__val" id="entrySum"></span></div>' +
-    '<div class="grid2">' +
-      '<button class="btn btn--soft" id="entryCancel" type="button">Отмена</button>' +
-      '<button class="btn btn--primary" id="entryAdd" type="button">' + (index != null ? 'Сохранить' : 'Добавить') + '</button>' +
-    '</div>';
-  panel.hidden = false;
-
-  const q = $('entryQty');
-  const recalc = () => {
-    const unit = isSell ? num($('entryPrice').value) : num($('entryCost').value);
-    $('entrySum').textContent = money(Math.max(0, num(q.value)) * Math.max(0, unit)) + ' ' + cur();
-  };
-  $('entryDec').onclick = () => { q.value = Math.max(1, num(q.value) - 1); recalc(); };
-  $('entryInc').onclick = () => { q.value = num(q.value) + 1; recalc(); };
-  q.oninput = recalc;
-  (isSell ? $('entryPrice') : $('entryCost')).oninput = recalc;
-  recalc();
-
-  $('entryAdd').onclick = commitEntry;
-  $('entryCancel').onclick = () => closeEntry(kind);
-  $('entryClose').onclick = () => closeEntry(kind);
-  setTimeout(() => { const f = isSell ? $('entryPrice') : $('entryCost'); if (f) f.focus(); }, 60);
-}
-
-function closeEntry(kind) {
-  $(kind === 'sell' ? 'sellEntry' : 'buyEntry').hidden = true;
-  entry = null;
+  // Clear the search and keep focus there so the next item is one tap away.
   const s = $(kind === 'sell' ? 'sellSearch' : 'buySearch');
   s.value = '';
+  $(kind === 'sell' ? 'sellResults' : 'buyResults').hidden = true;
+  if (kind === 'sell') renderSellCart(); else renderBuyCart();
   s.focus();
 }
 
-function commitEntry() {
-  if (!entry) return;
-  const kind = entry.kind, index = entry.index, p = entry.product;
+// Compact qty stepper (− [n] +). Empty price stays empty: no stray "0" to clear.
+function stepperHTML(i, qty) {
+  return '<div class="stepper">' +
+    '<button type="button" data-dec="' + i + '" aria-label="Меньше">−</button>' +
+    '<input class="stepper__val" data-qty="' + i + '" inputmode="decimal" value="' + qtyStr(qty) + '">' +
+    '<button type="button" data-inc="' + i + '" aria-label="Больше">+</button>' +
+  '</div>';
+}
+
+function priceFieldHTML(attr, i, val, label) {
+  return '<label class="price-field">' +
+    '<span class="price-field__lbl">' + label + '</span>' +
+    '<input class="price-field__inp" data-' + attr + '="' + i + '" inputmode="decimal" value="' +
+      (val ? val : '') + '">' +
+  '</label>';
+}
+
+// Wire inline controls for the rendered cart of `kind`. Qty/price typing
+// updates the line sum and grand total live (no re-render → focus is kept);
+// the +/−/delete buttons re-render the whole cart.
+function bindCart(kind) {
   const isSell = kind === 'sell';
-  const qty = Math.max(0, num($('entryQty').value));
-  if (!(qty > 0)) { toast('Количество должно быть больше 0', 'err'); return; }
-
-  let item;
-  if (isSell) {
-    item = { sku: p.sku, name: p.name, unit: p.unit, stock: p.stock,
-             qty: qty, price: Math.max(0, num($('entryPrice').value)) };
-  } else {
-    item = { sku: p.sku, name: p.name, unit: p.unit, stock: p.stock, qty: qty,
-             costPrice: Math.max(0, num($('entryCost').value)),
-             salePrice: Math.max(0, num($('entrySale').value)) };
-  }
-
+  const box = $(isSell ? 'sellCart' : 'buyCart');
   const cart = state.cart[kind];
-  if (index != null) {
-    cart[index] = item;
+  const renderAll = isSell ? renderSellCart : renderBuyCart;
+
+  const refresh = (i) => {
+    const it = cart[i];
+    const unit = isSell ? it.price : it.costPrice;
+    const sumEl = box.querySelector('[data-sum="' + i + '"]');
+    if (sumEl) sumEl.textContent = money(num(it.qty) * num(unit));
+    $(isSell ? 'sellTotal' : 'buyTotal').textContent = money(cartTotal(kind)) + ' ' + cur();
+  };
+
+  box.querySelectorAll('[data-del]').forEach(b => b.onclick =
+    () => { cart.splice(+b.dataset.del, 1); renderAll(); });
+  box.querySelectorAll('[data-dec]').forEach(b => b.onclick =
+    () => { const i = +b.dataset.dec; cart[i].qty = Math.max(1, num(cart[i].qty) - 1); renderAll(); });
+  box.querySelectorAll('[data-inc]').forEach(b => b.onclick =
+    () => { const i = +b.dataset.inc; cart[i].qty = num(cart[i].qty) + 1; renderAll(); });
+  box.querySelectorAll('[data-qty]').forEach(inp => inp.oninput =
+    () => { const i = +inp.dataset.qty; cart[i].qty = Math.max(0, num(inp.value)); refresh(i); });
+
+  if (isSell) {
+    box.querySelectorAll('[data-price]').forEach(inp => inp.oninput =
+      () => { const i = +inp.dataset.price; cart[i].price = Math.max(0, num(inp.value)); refresh(i); });
   } else {
-    const ex = cart.findIndex(i => i.sku === p.sku);   // same product already in cart → replace
-    if (ex >= 0) cart[ex] = item; else cart.push(item);
+    box.querySelectorAll('[data-cost]').forEach(inp => inp.oninput =
+      () => { const i = +inp.dataset.cost; cart[i].costPrice = Math.max(0, num(inp.value)); refresh(i); });
+    box.querySelectorAll('[data-sale]').forEach(inp => inp.oninput =
+      () => { const i = +inp.dataset.sale; cart[i].salePrice = Math.max(0, num(inp.value)); });
   }
-  closeEntry(kind);
-  if (isSell) renderSellCart(); else renderBuyCart();
-  toast(index != null ? 'Изменено' : 'Добавлено', 'ok');
 }
 
 async function submitSell() {
   const cart = state.cart.sell;
   if (!cart.length) { toast('Корзина пуста', 'err'); return; }
+  const client = $('sellClient').value.trim();
+  if (isCreditPayment(state.payment) && !client) {
+    status($('sellStatus'), 'Для оплаты «' + state.payment + '» выберите клиента — на него оформится долг.', 'err');
+    toast('Укажите клиента для долга', 'err');
+    return;
+  }
   const btn = $('btnSellSubmit');
   btn.disabled = true;
   btn.innerHTML = '<span class="spin"></span> Сохранение…';
@@ -501,8 +557,8 @@ async function submitSell() {
   try {
     const rows = cart.map(i => ({
       date: todayISO(), sku: i.sku, qty: i.qty, price: i.price,
-      client: $('sellClient').value.trim(),
-      payment: $('sellPayment').value
+      client: client,
+      payment: state.payment || ''
     }));
     const resp = await apiPost('createSales', { rows });
     state.cart.sell = [];
@@ -527,7 +583,7 @@ function openBuy() {
   status($('buyStatus'), '', '');
   ensureCatalog()
     .then(cat => {
-      fillSelect($('buyPayment'), cat.payments, ['Касса', 'В долг']);
+      buildPaymentMenu(cat.payments);
       $('supplierList').innerHTML = (cat.suppliers || [])
         .map(s => '<option value="' + escapeHtml(s) + '">').join('');
       renderBuyCart();
@@ -540,13 +596,13 @@ function openBuy() {
 }
 
 function onBuySearch() {
-  renderResults($('buyResults'), searchProducts($('buySearch').value, 8), p => openEntry('buy', p));
+  renderResults($('buyResults'), searchProducts($('buySearch').value, 8), p => addToCart('buy', p));
 }
 function onBuyEnter() {
   const q = $('buySearch').value.trim();
   if (!q) return;
   const exact = exactProduct(q) || (searchProducts(q, 2).length === 1 ? searchProducts(q, 1)[0] : null);
-  if (exact) openEntry('buy', exact); else toast('Товар не найден', 'err');
+  if (exact) addToCart('buy', exact); else toast('Товар не найден', 'err');
 }
 
 function renderBuyCart() {
@@ -559,19 +615,21 @@ function renderBuyCart() {
   } else {
     box.innerHTML = cart.map((it, i) =>
       '<div class="cart-row">' +
-        '<button class="cart-row__tap" data-edit="' + i + '" type="button">' +
+        '<div class="cart-row__top">' +
           '<span class="cart-row__name">' + escapeHtml(it.name) + '</span>' +
-          '<span class="cart-row__calc">' + qtyStr(it.qty) + ' × ' + money(it.costPrice) +
-            ' · прод. ' + money(it.salePrice) + '</span>' +
-        '</button>' +
-        '<span class="cart-row__sum">' + money(it.qty * it.costPrice) + '</span>' +
-        '<button class="cart-row__del" data-del="' + i + '" type="button" aria-label="Удалить">×</button>' +
+          '<button class="cart-row__del" data-del="' + i + '" type="button" aria-label="Удалить">×</button>' +
+        '</div>' +
+        '<div class="cart-row__controls">' +
+          stepperHTML(i, it.qty) +
+          '<span class="cart-row__sum" data-sum="' + i + '">' + money(it.qty * it.costPrice) + '</span>' +
+        '</div>' +
+        '<div class="cart-row__prices">' +
+          priceFieldHTML('cost', i, it.costPrice, 'Цена прихода') +
+          priceFieldHTML('sale', i, it.salePrice, 'Цена продажи') +
+        '</div>' +
       '</div>'
     ).join('');
-    box.querySelectorAll('[data-edit]').forEach(b => b.onclick =
-      () => openEntry('buy', state.cart.buy[+b.dataset.edit], +b.dataset.edit));
-    box.querySelectorAll('[data-del]').forEach(b => b.onclick =
-      () => { state.cart.buy.splice(+b.dataset.del, 1); renderBuyCart(); });
+    bindCart('buy');
   }
   $('buyTotal').textContent = money(cartTotal('buy')) + ' ' + cur();
 }
@@ -588,7 +646,7 @@ async function submitBuy() {
       date: todayISO(), sku: i.sku, qty: i.qty,
       costPrice: i.costPrice, salePrice: i.salePrice,
       supplier: $('buySupplier').value.trim(),
-      payment: $('buyPayment').value
+      payment: state.payment || ''
     }));
     const resp = await apiPost('createPurchases', { rows });
     state.cart.buy = [];
@@ -612,7 +670,85 @@ function openData(key, title, fetcher) {
   showScreen('dataScreen', title);
   $('dataTitle').textContent = title;
   state.reloadData = fetcher;
+  // Касса gets the «Погашение кредита» tool; other data screens hide it.
+  if (key === 'cash') {
+    renderCashTools();
+  } else {
+    $('dataTools').hidden = true;
+    $('dataTools').innerHTML = '';
+  }
   fetcher();
+}
+
+/* ------------------------------------------------------------
+   ПОГАШЕНИЕ КРЕДИТА (операция в Кассе → ПКО)
+   Выбираем клиента-должника (с остатком долга), вводим сумму,
+   оформляем приходный кассовый ордер. Долг уменьшается на бэкенде.
+------------------------------------------------------------- */
+function renderCashTools() {
+  const box = $('dataTools');
+  box.hidden = false;
+  box.innerHTML =
+    '<button class="btn btn--soft" id="btnRepayToggle" type="button">💸 Погашение кредита</button>' +
+    '<div id="repayForm" class="repay" hidden>' +
+      '<label class="field"><span class="field__label">Клиент (должник)</span>' +
+        '<input type="text" id="repayClient" list="debtorList" autocomplete="off" placeholder="Выберите должника"></label>' +
+      '<datalist id="debtorList"></datalist>' +
+      '<p class="muted small repay__debt" id="repayDebt" hidden></p>' +
+      '<label class="field"><span class="field__label">Сумма погашения</span>' +
+        '<input type="text" id="repayAmount" inputmode="decimal" placeholder="Сумма"></label>' +
+      '<button class="btn btn--primary" id="btnRepaySubmit" type="button">Оформить ПКО</button>' +
+      '<p class="status" id="repayStatus" hidden></p>' +
+    '</div>';
+
+  ensureCatalog().then(cat => {
+    state.debtors = (cat.clients || []).filter(c => num(c.debt) > 0);
+    $('debtorList').innerHTML = state.debtors
+      .map(c => '<option value="' + escapeHtml(c.name) + '">долг ' + money(c.debt) + ' ' + cur() + '</option>')
+      .join('');
+  }).catch(() => {});
+
+  $('btnRepayToggle').onclick = () => { $('repayForm').hidden = !$('repayForm').hidden; };
+  $('repayClient').oninput = () => {
+    const c = (state.debtors || []).find(d => d.name === $('repayClient').value.trim());
+    const el = $('repayDebt');
+    if (c) {
+      el.textContent = 'Остаток долга: ' + money(c.debt) + ' ' + cur();
+      el.hidden = false;
+      if (!$('repayAmount').value) $('repayAmount').value = c.debt;   // default = full debt
+    } else {
+      el.hidden = true;
+    }
+  };
+  $('btnRepaySubmit').onclick = submitRepay;
+}
+
+async function submitRepay() {
+  const client = $('repayClient').value.trim();
+  const amount = Math.max(0, num($('repayAmount').value));
+  if (!client)        { status($('repayStatus'), 'Выберите клиента-должника.', 'err'); return; }
+  if (!(amount > 0))  { status($('repayStatus'), 'Введите сумму погашения.', 'err'); return; }
+
+  const btn = $('btnRepaySubmit');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"></span> Оформление…';
+  status($('repayStatus'), '', '');
+  try {
+    const resp = await apiPost('createRepayment',
+      { date: todayISO(), client: client, amount: amount, payment: state.payment || '' });
+    status($('repayStatus'), resp.message || 'ПКО оформлен ✓', 'ok');
+    toast('Погашение оформлено', 'ok');
+    state.catalog = null;                       // долги изменились → обновить каталог
+    $('repayClient').value = '';
+    $('repayAmount').value = '';
+    $('repayDebt').hidden = true;
+    if (state.reloadData) state.reloadData();    // перезагрузить кассу
+  } catch (err) {
+    status($('repayStatus'), describeError(err), 'err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Оформить ПКО';
+  }
 }
 
 async function fetchInto(promise, renderer) {
@@ -806,7 +942,22 @@ async function init() {
   $('buySearch').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); onBuyEnter(); } });
   $('btnBuySubmit').addEventListener('click', submitBuy);
 
+  // Header "Оплатить" — submits the cart of whichever action screen is open.
+  $('btnHeaderPay').addEventListener('click', () => {
+    if (state.activeTab === 'sell') submitSell();
+    else if (state.activeTab === 'buy') submitBuy();
+  });
+
   $('btnReload').addEventListener('click', () => { if (state.reloadData) state.reloadData(); });
+
+  // Header payment/currency switcher: toggle on tap, close on outside tap.
+  $('btnPayment').addEventListener('click', (e) => {
+    e.stopPropagation();
+    $('payMenu').hidden = !$('payMenu').hidden;
+  });
+  document.addEventListener('click', (e) => {
+    if (!$('payMenu').hidden && !e.target.closest('.paywrap')) closePayMenu();
+  });
 
   setupInstallPrompt();
 
@@ -833,7 +984,6 @@ async function init() {
   applyTheme(state.config.theme);
   applyManifest(state.config);
   $('loginClientName').textContent = state.config.name;
-  $('topTitle').textContent = state.config.name;
   document.title = state.config.name + ' — Salmon';
 
   // 4. Auto-login if a token for THIS client is stored.

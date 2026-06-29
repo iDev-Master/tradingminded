@@ -50,9 +50,52 @@ html, body {
   backdrop-filter: blur(8px);
   border-bottom: 1px solid var(--line);
 }
-.topbar__title { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 18px; }
-.topbar__right { display: flex; align-items: center; gap: 10px; }
-.logo { font-size: 22px; }
+.topbar__left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.topbar__user {
+  font-weight: 700; font-size: 16px;
+  max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.topbar__right { display: flex; align-items: center; gap: 8px; flex: none; }
+.logo { font-size: 22px; flex: none; }
+
+/* Кнопка «Оплатить» в шапке */
+.btn-pay--go {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  color: #fff;
+  font-weight: 700;
+}
+
+/* Переключатель оплаты/валюты в шапке */
+.paywrap { position: relative; }
+.btn-pay {
+  display: flex; align-items: center; gap: 6px;
+  height: 38px; padding: 0 12px;
+  background: var(--bg-3); border: none; border-radius: 10px;
+  color: var(--text); font-size: 14px; font-weight: 600;
+  cursor: pointer; max-width: 130px;
+}
+.btn-pay svg { width: 18px; height: 18px; flex: none; }
+.btn-pay span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.btn-pay:active { transform: scale(.96); }
+
+/* Выпадающее меню (оплата) */
+.menu {
+  position: absolute; top: calc(100% + 6px); right: 0;
+  min-width: 170px; z-index: 60;
+  background: var(--bg-2); border: 1px solid var(--line);
+  border-radius: 12px; padding: 6px;
+  box-shadow: 0 12px 30px rgba(0,0,0,.5);
+  display: flex; flex-direction: column; gap: 2px;
+}
+.menu__item {
+  display: flex; align-items: center; justify-content: space-between;
+  background: none; border: none; color: var(--text);
+  text-align: left; padding: 11px 12px; border-radius: 8px;
+  font-size: 15px; cursor: pointer;
+}
+.menu__item:active { background: var(--bg-3); }
+.menu__item--on { color: var(--accent-2); font-weight: 700; }
+.menu__item--on::after { content: '✓'; }
 
 .role-badge {
   font-size: 12px;
@@ -66,6 +109,7 @@ html, body {
 .role-badge.viewer { background: rgba(148, 163, 184, .18); color: var(--muted); }
 
 .btn-icon {
+  display: flex; align-items: center; justify-content: center;
   background: var(--bg-3);
   border: none;
   color: var(--text);
@@ -74,6 +118,7 @@ html, body {
   font-size: 18px;
   cursor: pointer;
 }
+.btn-icon svg { width: 20px; height: 20px; display: block; }
 .btn-icon:active { transform: scale(.94); }
 
 /* ───────── Контейнер ───────── */
@@ -437,112 +482,75 @@ select {
 }
 .cart-item__sum--right { display: block; text-align: right; margin-top: 8px; }
 
-/* Степпер количества */
-.stepper { display: flex; align-items: center; gap: 0; flex: none; }
+/* Степпер количества (− [n] +) */
+.stepper { display: flex; align-items: stretch; flex: none; border-radius: 10px; overflow: hidden; }
 .stepper button {
-  width: 34px; height: 38px;
+  width: 40px; height: 44px;
   border: none;
   background: var(--bg-2);
   color: var(--text);
-  font-size: 20px; line-height: 1;
+  font-size: 22px; line-height: 1;
   cursor: pointer;
 }
-.stepper button:first-child { border-radius: 9px 0 0 9px; }
-.stepper button:last-child  { border-radius: 0 9px 9px 0; }
-.stepper .qty {
-  width: 48px;
-  height: 38px;
-  text-align: center;
-  padding: 0;
+.stepper button:active { background: var(--line); }
+.stepper__val {
+  width: 46px; height: 44px;
+  text-align: center; padding: 0;
   border-radius: 0;
   background: var(--bg-2);
+  font-size: 16px; font-weight: 600;
 }
 
-/* Поле цены внутри строки корзины */
-.price-field { display: flex; flex-direction: column; gap: 2px; }
-.price-field > span { font-size: 11px; color: var(--muted); }
-.price-field input {
-  width: 92px;
-  height: 38px;
-  padding: 0 10px;
-  background: var(--bg-2);
-}
+/* Поле цены в строке корзины (подпись сверху + значение из каталога) */
+.price-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.price-field__lbl { font-size: 11px; color: var(--muted); }
+.price-field__inp { height: 44px; padding: 0 12px; background: var(--bg-2); font-size: 16px; }
 
 /* Цвета статуса остатка в списках */
 .amount--danger { color: #fca5a5 !important; }
 .amount--warn   { color: var(--warn) !important; }
 
-/* ───────── Панель ввода позиции (Продать/Купить) ───────── */
-.entry {
-  margin-top: 12px;
-  padding-top: 14px;
-  border-top: 1px solid var(--line);
-  animation: fade .15s ease;
-}
-.entry__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
-.entry__name { font-weight: 700; font-size: 17px; }
-.entry__close {
-  flex: none; width: 30px; height: 30px;
-  border: none; border-radius: 8px;
-  background: var(--bg-3); color: var(--muted);
-  font-size: 20px; line-height: 1; cursor: pointer;
-}
-.entry__sku { margin: 2px 0 12px; }
-.entry .field { margin-bottom: 12px; }
-.entry input { font-size: 17px; }
-
-/* Крупный степпер для панели ввода */
-.stepper--lg { width: 100%; }
-.stepper--lg button {
-  width: 56px; height: 50px;
-  font-size: 26px;
-  background: var(--bg-2);
-  border: 1px solid var(--line);
-  color: var(--text);
-  cursor: pointer;
-}
-.stepper--lg button:first-child { border-radius: 10px 0 0 10px; }
-.stepper--lg button:last-child  { border-radius: 0 10px 10px 0; }
-.stepper--lg .qty, .stepper--lg input {
-  flex: 1; height: 50px; min-width: 0;
-  text-align: center; font-size: 20px; font-weight: 600;
-  border-radius: 0;
-  border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
-  background: var(--bg-2);
-}
-
 /* Вторичная (полноширинная) кнопка */
 .btn--soft { background: var(--bg-3); color: var(--text); }
 
-/* ───────── Строки корзины ───────── */
-.cart-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+/* Поле, обязательное в текущем контексте (например, клиент при кредите) */
+input.field--required { border-color: var(--warn); }
+
+/* Инструменты экрана Кассы + панель погашения кредита */
+.data-tools { margin-bottom: 14px; }
+.repay {
+  margin-top: 12px;
+  padding: 14px;
   background: var(--bg-3);
   border-radius: 12px;
-  padding: 4px 6px 4px 12px;
   animation: fade .15s ease;
 }
-.cart-row__tap {
-  flex: 1; min-width: 0;
-  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
-  background: none; border: none; color: var(--text);
-  text-align: left; padding: 8px 0; cursor: pointer;
+.repay .field:last-of-type { margin-bottom: 12px; }
+.repay__debt { margin: -6px 0 12px; color: var(--warn); }
+
+/* ───────── Строки корзины (инлайн-редактирование) ───────── */
+.cart-row {
+  background: var(--bg-3);
+  border-radius: 12px;
+  padding: 12px;
+  display: flex; flex-direction: column; gap: 12px;
+  animation: fade .15s ease;
 }
-.cart-row__name {
-  font-weight: 600; font-size: 15px;
-  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.cart-row__calc { font-size: 12px; color: var(--muted); }
-.cart-row__sum { font-weight: 700; color: var(--accent-2); white-space: nowrap; }
+.cart-row__top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.cart-row__name { font-weight: 600; font-size: 15px; line-height: 1.3; }
 .cart-row__del {
-  flex: none; width: 34px; height: 34px;
+  flex: none; width: 32px; height: 32px;
   border: none; border-radius: 8px;
   background: rgba(239,68,68,.16); color: #fca5a5;
-  font-size: 18px; line-height: 1; cursor: pointer;
+  font-size: 20px; line-height: 1; cursor: pointer;
 }
+.cart-row__controls { display: flex; align-items: flex-end; gap: 12px; }
+.cart-row__controls .price-field { flex: 1; }
+.cart-row__sum {
+  margin-left: auto; align-self: center;
+  font-weight: 700; font-size: 16px; color: var(--accent-2); white-space: nowrap;
+}
+.cart-row__prices { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 
 /* ───────── Дашборд ───────── */
 .dash-section {
@@ -578,35 +586,41 @@ select {
   padding: 8px 4px calc(var(--safe-bottom) + 8px);
 }
 .tab {
+  position: relative;
   flex: 1 1 0;
   min-width: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: flex-end;
-  gap: 3px;
+  justify-content: center;
+  gap: 4px;
   background: none;
   border: none;
   color: var(--muted);
   cursor: pointer;
-  padding: 4px 2px;
-  transition: transform .14s ease, color .14s;
-  transform-origin: bottom center;
+  padding: 8px 2px 6px;
+  transition: color .15s;
 }
-.tab:active { opacity: .7; }
-.tab__icon  { font-size: 22px; line-height: 1; }
+.tab:active { opacity: .6; }
+.tab__icon { line-height: 0; }
+.tab__icon svg { width: 24px; height: 24px; display: block; }
 .tab__label {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* Активная вкладка — крупнее остальных и акцентного цвета */
-.tab--active {
-  color: var(--accent-2);
-  transform: scale(1.18) translateY(-2px);
+/* Активная вкладка — акцентный цвет + индикатор сверху, без скачка размера */
+.tab--active { color: var(--accent-2); }
+.tab--active::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 50%;
+  transform: translateX(-50%);
+  width: 28px; height: 3px;
+  border-radius: 0 0 3px 3px;
+  background: var(--accent-2);
 }
-.tab--active .tab__icon { filter: drop-shadow(0 3px 8px rgba(20, 184, 166, .45)); }
 .tab--active .tab__label { font-weight: 700; }
