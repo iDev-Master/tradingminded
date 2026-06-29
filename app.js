@@ -81,21 +81,29 @@ function applyTheme(theme) {
 
 // Build a per-client manifest at runtime so an installed PWA keeps
 // the ?client= param (single static manifest can't do that).
+// IMPORTANT: the manifest is served from a blob: URL, so every path
+// inside it MUST be absolute. Relative paths would resolve against the
+// blob URL (blob:…/uuid) instead of the site, breaking icon/start_url
+// resolution — which silently disables Chrome's "Install" prompt.
 function applyManifest(cfg) {
+  const abs = (path) => new URL(path, location.href).href;
   const manifest = {
+    id: abs('./?client=' + cfg.id),       // stable per-client app identity
     name: cfg.name,
     short_name: cfg.name,
     description: 'Складской учёт и продажи',
     lang: 'ru',
-    start_url: './?client=' + cfg.id,    // preserves the client on launch
-    scope: './',
+    start_url: abs('./?client=' + cfg.id), // preserves the client on launch
+    scope: abs('./'),
     display: 'standalone',
     orientation: 'portrait',
     background_color: (cfg.theme && cfg.theme.bg) || '#0f172a',
     theme_color: (cfg.theme && cfg.theme.accent) || '#0f766e',
     icons: [
-      { src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
-      { src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' }
+      { src: abs('icons/icon-192.png'), sizes: '192x192', type: 'image/png', purpose: 'any' },
+      { src: abs('icons/icon-512.png'), sizes: '512x512', type: 'image/png', purpose: 'any' },
+      { src: abs('icons/icon-192.png'), sizes: '192x192', type: 'image/png', purpose: 'maskable' },
+      { src: abs('icons/icon-512.png'), sizes: '512x512', type: 'image/png', purpose: 'maskable' }
     ]
   };
   const blob = new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' });
@@ -346,6 +354,41 @@ async function loadData() {
 }
 
 /* ============================================================
+   5b. PWA INSTALL PROMPT
+   ------------------------------------------------------------
+   Chrome/Edge/Android fire 'beforeinstallprompt' when the app is
+   installable. We stash the event and reveal our own button so the
+   user has an obvious way to install. iOS Safari never fires this —
+   there the user installs via Share → "На экран Домой".
+============================================================ */
+let deferredInstall = null;
+
+function setupInstallPrompt() {
+  const btn = $('btnInstall');
+
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();          // suppress the default mini-infobar
+    deferredInstall = e;
+    btn.hidden = false;          // show our own install affordance
+  });
+
+  btn.addEventListener('click', async () => {
+    if (!deferredInstall) return;
+    deferredInstall.prompt();
+    try { await deferredInstall.userChoice; } catch (e) {}
+    deferredInstall = null;
+    btn.hidden = true;
+  });
+
+  // Once installed, hide the button for good.
+  window.addEventListener('appinstalled', () => {
+    deferredInstall = null;
+    btn.hidden = true;
+    toast('Приложение установлено', 'ok');
+  });
+}
+
+/* ============================================================
    6. BOOTSTRAP
 ============================================================ */
 async function init() {
@@ -355,6 +398,7 @@ async function init() {
   $('btnLogout').addEventListener('click', doLogout);
   $('btnSubmit').addEventListener('click', submitData);
   $('btnLoad').addEventListener('click', loadData);
+  setupInstallPrompt();
 
   // Register the service worker (relative path → scope = /repo/ on Pages).
   if ('serviceWorker' in navigator) {
