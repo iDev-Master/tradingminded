@@ -85,10 +85,16 @@ const state = {
   reloadData: null  // re-fetch fn for the active data screen
 };
 
-const tokenKey = () => 'salmon_token_' + state.clientId;
+const tokenKey = () => 'salmon_token_' + state.clientId;       // active session token (drives auto-login)
 const getToken = () => localStorage.getItem(tokenKey()) || '';
 const setToken = (t) => localStorage.setItem(tokenKey(), t);
 const clearToken = () => localStorage.removeItem(tokenKey());
+
+// Last successfully-used token, kept even after logout so the login field
+// can pre-fill it → one tap to sign back in (no retyping).
+const rememberKey = () => 'salmon_lasttoken_' + state.clientId;
+const getRemembered = () => localStorage.getItem(rememberKey()) || '';
+const setRemembered = (t) => localStorage.setItem(rememberKey(), t);
 
 /* ============================================================
    1. CLIENT CONFIG LOADING (multi-tenant)
@@ -198,7 +204,8 @@ function showLogin() {
   $('tabbar').hidden = true;
   hideScreens();
   $('loginScreen').hidden = false;
-  $('tokenInput').value = '';
+  // Pre-fill the last-used token so the user can sign in with one tap.
+  $('tokenInput').value = getRemembered();
 }
 
 // Show a single module screen and set the topbar title.
@@ -664,6 +671,7 @@ async function doLogin() {
   try {
     const session = await apiGet('whoami');
     state.session = session;
+    setRemembered(token);   // remember for next time (pre-fill the login field)
     if (enterApp(session)) toast('Вы вошли как ' + session.role, 'ok');
   } catch (err) {
     clearToken();
@@ -737,6 +745,16 @@ async function init() {
   $('btnLogin').addEventListener('click', doLogin);
   $('tokenInput').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
   $('btnLogout').addEventListener('click', doLogout);
+
+  // Show/hide token (eye toggle).
+  $('btnToggleToken').addEventListener('click', () => {
+    const inp = $('tokenInput');
+    const show = inp.type === 'password';
+    inp.type = show ? 'text' : 'password';
+    $('btnToggleToken').textContent = show ? '🙈' : '👁';
+    $('btnToggleToken').setAttribute('aria-label', show ? 'Скрыть токен' : 'Показать токен');
+    inp.focus();
+  });
 
   $('sellSearch').addEventListener('input', onSellSearch);
   $('sellSearch').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); onSellEnter(); } });

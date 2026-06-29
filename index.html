@@ -58,8 +58,12 @@
 
         <label class="field">
           <span class="field__label">Токен доступа</span>
-          <input type="password" id="tokenInput" inputmode="text" autocomplete="off"
-                 placeholder="Введите ваш токен" autocapitalize="off" spellcheck="false">
+          <div class="input-wrap">
+            <input type="password" id="tokenInput" inputmode="text" autocomplete="off"
+                   placeholder="Введите ваш токен" autocapitalize="off" spellcheck="false">
+            <button type="button" class="input-eye" id="btnToggleToken"
+                    aria-label="Показать токен" title="Показать токен">👁</button>
+          </div>
         </label>
 
         <button class="btn btn--primary" id="btnLogin">Войти</button>
