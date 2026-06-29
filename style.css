@@ -159,17 +159,16 @@ select {
   position: absolute;
   top: 0; right: 0;
   height: 100%;
-  width: 44px;
+  width: 46px;
   display: flex;
   align-items: center;
   justify-content: center;
   background: none;
   border: none;
-  font-size: 18px;
-  line-height: 1;
+  color: var(--muted);
   cursor: pointer;
-  opacity: .85;
 }
+.input-eye svg { width: 22px; height: 22px; display: block; }
 .input-eye:active { transform: scale(.9); }
 
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
@@ -472,6 +471,78 @@ select {
 /* Цвета статуса остатка в списках */
 .amount--danger { color: #fca5a5 !important; }
 .amount--warn   { color: var(--warn) !important; }
+
+/* ───────── Панель ввода позиции (Продать/Купить) ───────── */
+.entry {
+  margin-top: 12px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  animation: fade .15s ease;
+}
+.entry__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.entry__name { font-weight: 700; font-size: 17px; }
+.entry__close {
+  flex: none; width: 30px; height: 30px;
+  border: none; border-radius: 8px;
+  background: var(--bg-3); color: var(--muted);
+  font-size: 20px; line-height: 1; cursor: pointer;
+}
+.entry__sku { margin: 2px 0 12px; }
+.entry .field { margin-bottom: 12px; }
+.entry input { font-size: 17px; }
+
+/* Крупный степпер для панели ввода */
+.stepper--lg { width: 100%; }
+.stepper--lg button {
+  width: 56px; height: 50px;
+  font-size: 26px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  color: var(--text);
+  cursor: pointer;
+}
+.stepper--lg button:first-child { border-radius: 10px 0 0 10px; }
+.stepper--lg button:last-child  { border-radius: 0 10px 10px 0; }
+.stepper--lg .qty, .stepper--lg input {
+  flex: 1; height: 50px; min-width: 0;
+  text-align: center; font-size: 20px; font-weight: 600;
+  border-radius: 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-2);
+}
+
+/* Вторичная (полноширинная) кнопка */
+.btn--soft { background: var(--bg-3); color: var(--text); }
+
+/* ───────── Строки корзины ───────── */
+.cart-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-3);
+  border-radius: 12px;
+  padding: 4px 6px 4px 12px;
+  animation: fade .15s ease;
+}
+.cart-row__tap {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  background: none; border: none; color: var(--text);
+  text-align: left; padding: 8px 0; cursor: pointer;
+}
+.cart-row__name {
+  font-weight: 600; font-size: 15px;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cart-row__calc { font-size: 12px; color: var(--muted); }
+.cart-row__sum { font-weight: 700; color: var(--accent-2); white-space: nowrap; }
+.cart-row__del {
+  flex: none; width: 34px; height: 34px;
+  border: none; border-radius: 8px;
+  background: rgba(239,68,68,.16); color: #fca5a5;
+  font-size: 18px; line-height: 1; cursor: pointer;
+}
 
 /* ───────── Дашборд ───────── */
 .dash-section {
