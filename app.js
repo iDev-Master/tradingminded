@@ -82,7 +82,8 @@ const state = {
   session: null,    // whoami: {role, modules, currency}
   catalog: null,    // {products, payments, suppliers}
   cart: { sell: [], buy: [] },
-  reloadData: null  // re-fetch fn for the active data screen
+  reloadData: null,     // re-fetch fn for the active data screen
+  installAvailable: false   // PWA install offer (mobile, not yet installed)
 };
 
 const tokenKey = () => 'salmon_token_' + state.clientId;       // active session token (drives auto-login)
@@ -206,6 +207,7 @@ function showLogin() {
   $('loginScreen').hidden = false;
   // Pre-fill the last-used token so the user can sign in with one tap.
   $('tokenInput').value = getRemembered();
+  refreshInstallBtn();
 }
 
 // Show a single module screen and set the topbar title.
@@ -214,6 +216,14 @@ function showScreen(id, title) {
   $('topbar').hidden = false;
   $(id).hidden = false;
   $('topTitle').textContent = title || state.config.name;
+  refreshInstallBtn();
+}
+
+// The install affordance is shown ONLY on the login screen, and only when an
+// install is actually available (mobile, not already installed).
+function refreshInstallBtn() {
+  const onLogin = !$('loginScreen').hidden;
+  $('btnInstall').hidden = !(state.installAvailable && onLogin);
 }
 
 /* ============================================================
@@ -331,32 +341,18 @@ function openSell() {
 
 function onSellSearch() {
   const q = $('sellSearch').value;
-  renderResults($('sellResults'), searchProducts(q, 8), addSellItem);
+  renderResults($('sellResults'), searchProducts(q, 8), p => openEntry('sell', p));
 }
 
 function onSellEnter() {
   const q = $('sellSearch').value.trim();
   if (!q) return;
   const exact = exactProduct(q) || (searchProducts(q, 2).length === 1 ? searchProducts(q, 1)[0] : null);
-  if (exact) addSellItem(exact);
+  if (exact) openEntry('sell', exact);
   else toast('Товар не найден', 'err');
 }
 
-function addSellItem(p) {
-  const existing = state.cart.sell.find(i => i.sku === p.sku);
-  if (existing) {
-    existing.qty += 1;
-  } else {
-    state.cart.sell.push({
-      sku: p.sku, name: p.name, unit: p.unit, stock: p.stock,
-      suggested: p.price, qty: 1, price: p.price   // price = фактическая (по умолч. = подсказка)
-    });
-  }
-  $('sellSearch').value = '';
-  $('sellResults').hidden = true;
-  $('sellSearch').focus();
-  renderSellCart();
-}
+const qtyStr = (n) => (Number.isInteger(n) ? String(n) : String(n).replace('.', ','));
 
 function renderSellCart() {
   const cart = state.cart.sell;
@@ -366,31 +362,21 @@ function renderSellCart() {
   if (!cart.length) {
     box.innerHTML = '<div class="row-item__empty">Корзина пуста — найдите товар выше</div>';
   } else {
-    box.innerHTML = cart.map((it, i) => {
-      const lineTotal = it.qty * it.price;
-      return '<div class="cart-item" data-i="' + i + '">' +
-        '<div class="cart-item__top">' +
-          '<span class="cart-item__name">' + escapeHtml(it.name) + '</span>' +
-          '<button class="cart-item__del" data-del="' + i + '" aria-label="Удалить">×</button>' +
-        '</div>' +
-        '<div class="cart-item__sku muted small">' + escapeHtml(it.sku) +
-          ' · ост: ' + it.stock + '</div>' +
-        '<div class="cart-item__controls">' +
-          '<div class="stepper">' +
-            '<button data-dec="' + i + '">−</button>' +
-            '<input class="qty" data-qty="' + i + '" inputmode="decimal" value="' + it.qty + '">' +
-            '<button data-inc="' + i + '">+</button>' +
-          '</div>' +
-          '<label class="price-field">' +
-            '<span>цена</span>' +
-            '<input data-price="' + i + '" inputmode="decimal" value="' + it.price + '">' +
-          '</label>' +
-          '<span class="cart-item__sum">' + money(lineTotal) + '</span>' +
-        '</div>' +
-      '</div>';
-    }).join('');
+    box.innerHTML = cart.map((it, i) =>
+      '<div class="cart-row">' +
+        '<button class="cart-row__tap" data-edit="' + i + '" type="button">' +
+          '<span class="cart-row__name">' + escapeHtml(it.name) + '</span>' +
+          '<span class="cart-row__calc">' + qtyStr(it.qty) + ' × ' + money(it.price) + '</span>' +
+        '</button>' +
+        '<span class="cart-row__sum">' + money(it.qty * it.price) + '</span>' +
+        '<button class="cart-row__del" data-del="' + i + '" type="button" aria-label="Удалить">×</button>' +
+      '</div>'
+    ).join('');
+    box.querySelectorAll('[data-edit]').forEach(b => b.onclick =
+      () => openEntry('sell', state.cart.sell[+b.dataset.edit], +b.dataset.edit));
+    box.querySelectorAll('[data-del]').forEach(b => b.onclick =
+      () => { state.cart.sell.splice(+b.dataset.del, 1); renderSellCart(); });
   }
-  wireCart('sell');
   $('sellTotal').textContent = money(cartTotal('sell')) + ' ' + cur();
 }
 
@@ -399,38 +385,110 @@ function cartTotal(kind) {
   return state.cart.buy.reduce((s, i) => s + i.qty * i.costPrice, 0);
 }
 
-// Wire steppers / qty / price / delete for either cart.
-function wireCart(kind) {
-  const cart = state.cart[kind];
-  const box = $(kind === 'sell' ? 'sellCart' : 'buyCart');
-  const rerender = kind === 'sell' ? renderSellCart : renderBuyCart;
+/* ------------------------------------------------------------
+   QUICK-ENTRY PANEL (shared by Продать / Купить)
+   Tap a search result OR a cart row → set qty + price here, then
+   add/save. No hunting for the line in the cart afterwards.
+------------------------------------------------------------- */
+let entry = null;   // { kind, index|null, product }
 
-  box.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', () => {
-    cart.splice(+b.dataset.del, 1); rerender();
-  }));
-  box.querySelectorAll('[data-inc]').forEach(b => b.addEventListener('click', () => {
-    cart[+b.dataset.inc].qty += 1; rerender();
-  }));
-  box.querySelectorAll('[data-dec]').forEach(b => b.addEventListener('click', () => {
-    const it = cart[+b.dataset.dec];
-    it.qty = Math.max(1, it.qty - 1); rerender();
-  }));
-  box.querySelectorAll('[data-qty]').forEach(inp => inp.addEventListener('change', () => {
-    const it = cart[+inp.dataset.qty];
-    it.qty = Math.max(0, num(inp.value)); rerender();
-  }));
-  if (kind === 'sell') {
-    box.querySelectorAll('[data-price]').forEach(inp => inp.addEventListener('change', () => {
-      cart[+inp.dataset.price].price = Math.max(0, num(inp.value)); rerender();
-    }));
-  } else {
-    box.querySelectorAll('[data-cost]').forEach(inp => inp.addEventListener('change', () => {
-      cart[+inp.dataset.cost].costPrice = Math.max(0, num(inp.value)); rerender();
-    }));
-    box.querySelectorAll('[data-sale]').forEach(inp => inp.addEventListener('change', () => {
-      cart[+inp.dataset.sale].salePrice = Math.max(0, num(inp.value)); rerender();
-    }));
+function openEntry(kind, product, index) {
+  entry = { kind: kind, index: (index == null ? null : index), product: product };
+  const isSell = kind === 'sell';
+  const panel = $(isSell ? 'sellEntry' : 'buyEntry');
+  $(isSell ? 'sellResults' : 'buyResults').hidden = true;
+  $(isSell ? 'sellSearch' : 'buySearch').value = '';
+
+  let qty = 1, price = product.price || 0, cost = product.cost || 0, sale = product.price || 0;
+  if (index != null) {
+    const it = state.cart[kind][index];
+    qty = it.qty;
+    if (isSell) price = it.price; else { cost = it.costPrice; sale = it.salePrice; }
   }
+
+  const head =
+    '<div class="entry__head"><span class="entry__name">' + escapeHtml(product.name) + '</span>' +
+    '<button class="entry__close" id="entryClose" type="button" aria-label="Закрыть">×</button></div>' +
+    '<div class="muted small entry__sku">' + escapeHtml(product.sku) + ' · ост: ' + product.stock + '</div>';
+
+  const qtyBlock =
+    '<div class="field"><span class="field__label">Количество</span>' +
+      '<div class="stepper stepper--lg">' +
+        '<button id="entryDec" type="button">−</button>' +
+        '<input id="entryQty" inputmode="decimal" value="' + qty + '">' +
+        '<button id="entryInc" type="button">+</button>' +
+      '</div></div>';
+
+  const priceBlock = isSell
+    ? '<div class="field"><span class="field__label">Цена за ед.</span>' +
+        '<input id="entryPrice" inputmode="decimal" value="' + (price || '') + '" placeholder="0"></div>'
+    : '<div class="grid2">' +
+        '<div class="field"><span class="field__label">Цена прихода</span>' +
+          '<input id="entryCost" inputmode="decimal" value="' + (cost || '') + '" placeholder="0"></div>' +
+        '<div class="field"><span class="field__label">Цена продажи</span>' +
+          '<input id="entrySale" inputmode="decimal" value="' + (sale || '') + '" placeholder="0"></div>' +
+      '</div>';
+
+  panel.innerHTML = head + qtyBlock + priceBlock +
+    '<div class="sum-row"><span>Сумма</span><span class="sum-row__val" id="entrySum"></span></div>' +
+    '<div class="grid2">' +
+      '<button class="btn btn--soft" id="entryCancel" type="button">Отмена</button>' +
+      '<button class="btn btn--primary" id="entryAdd" type="button">' + (index != null ? 'Сохранить' : 'Добавить') + '</button>' +
+    '</div>';
+  panel.hidden = false;
+
+  const q = $('entryQty');
+  const recalc = () => {
+    const unit = isSell ? num($('entryPrice').value) : num($('entryCost').value);
+    $('entrySum').textContent = money(Math.max(0, num(q.value)) * Math.max(0, unit)) + ' ' + cur();
+  };
+  $('entryDec').onclick = () => { q.value = Math.max(1, num(q.value) - 1); recalc(); };
+  $('entryInc').onclick = () => { q.value = num(q.value) + 1; recalc(); };
+  q.oninput = recalc;
+  (isSell ? $('entryPrice') : $('entryCost')).oninput = recalc;
+  recalc();
+
+  $('entryAdd').onclick = commitEntry;
+  $('entryCancel').onclick = () => closeEntry(kind);
+  $('entryClose').onclick = () => closeEntry(kind);
+  setTimeout(() => { const f = isSell ? $('entryPrice') : $('entryCost'); if (f) f.focus(); }, 60);
+}
+
+function closeEntry(kind) {
+  $(kind === 'sell' ? 'sellEntry' : 'buyEntry').hidden = true;
+  entry = null;
+  const s = $(kind === 'sell' ? 'sellSearch' : 'buySearch');
+  s.value = '';
+  s.focus();
+}
+
+function commitEntry() {
+  if (!entry) return;
+  const kind = entry.kind, index = entry.index, p = entry.product;
+  const isSell = kind === 'sell';
+  const qty = Math.max(0, num($('entryQty').value));
+  if (!(qty > 0)) { toast('Количество должно быть больше 0', 'err'); return; }
+
+  let item;
+  if (isSell) {
+    item = { sku: p.sku, name: p.name, unit: p.unit, stock: p.stock,
+             qty: qty, price: Math.max(0, num($('entryPrice').value)) };
+  } else {
+    item = { sku: p.sku, name: p.name, unit: p.unit, stock: p.stock, qty: qty,
+             costPrice: Math.max(0, num($('entryCost').value)),
+             salePrice: Math.max(0, num($('entrySale').value)) };
+  }
+
+  const cart = state.cart[kind];
+  if (index != null) {
+    cart[index] = item;
+  } else {
+    const ex = cart.findIndex(i => i.sku === p.sku);   // same product already in cart → replace
+    if (ex >= 0) cart[ex] = item; else cart.push(item);
+  }
+  closeEntry(kind);
+  if (isSell) renderSellCart(); else renderBuyCart();
+  toast(index != null ? 'Изменено' : 'Добавлено', 'ok');
 }
 
 async function submitSell() {
@@ -482,29 +540,13 @@ function openBuy() {
 }
 
 function onBuySearch() {
-  renderResults($('buyResults'), searchProducts($('buySearch').value, 8), addBuyItem);
+  renderResults($('buyResults'), searchProducts($('buySearch').value, 8), p => openEntry('buy', p));
 }
 function onBuyEnter() {
   const q = $('buySearch').value.trim();
   if (!q) return;
   const exact = exactProduct(q) || (searchProducts(q, 2).length === 1 ? searchProducts(q, 1)[0] : null);
-  if (exact) addBuyItem(exact); else toast('Товар не найден', 'err');
-}
-
-function addBuyItem(p) {
-  const existing = state.cart.buy.find(i => i.sku === p.sku);
-  if (existing) {
-    existing.qty += 1;
-  } else {
-    state.cart.buy.push({
-      sku: p.sku, name: p.name, unit: p.unit, stock: p.stock,
-      qty: 1, costPrice: p.cost || 0, salePrice: p.price || 0
-    });
-  }
-  $('buySearch').value = '';
-  $('buyResults').hidden = true;
-  $('buySearch').focus();
-  renderBuyCart();
+  if (exact) openEntry('buy', exact); else toast('Товар не найден', 'err');
 }
 
 function renderBuyCart() {
@@ -516,28 +558,21 @@ function renderBuyCart() {
     box.innerHTML = '<div class="row-item__empty">Пусто — найдите товар выше</div>';
   } else {
     box.innerHTML = cart.map((it, i) =>
-      '<div class="cart-item" data-i="' + i + '">' +
-        '<div class="cart-item__top">' +
-          '<span class="cart-item__name">' + escapeHtml(it.name) + '</span>' +
-          '<button class="cart-item__del" data-del="' + i + '" aria-label="Удалить">×</button>' +
-        '</div>' +
-        '<div class="cart-item__sku muted small">' + escapeHtml(it.sku) + ' · ост: ' + it.stock + '</div>' +
-        '<div class="cart-item__controls">' +
-          '<div class="stepper">' +
-            '<button data-dec="' + i + '">−</button>' +
-            '<input class="qty" data-qty="' + i + '" inputmode="decimal" value="' + it.qty + '">' +
-            '<button data-inc="' + i + '">+</button>' +
-          '</div>' +
-          '<label class="price-field"><span>приход</span>' +
-            '<input data-cost="' + i + '" inputmode="decimal" value="' + it.costPrice + '"></label>' +
-          '<label class="price-field"><span>продажа</span>' +
-            '<input data-sale="' + i + '" inputmode="decimal" value="' + it.salePrice + '"></label>' +
-        '</div>' +
-        '<div class="cart-item__sum cart-item__sum--right">' + money(it.qty * it.costPrice) + '</div>' +
+      '<div class="cart-row">' +
+        '<button class="cart-row__tap" data-edit="' + i + '" type="button">' +
+          '<span class="cart-row__name">' + escapeHtml(it.name) + '</span>' +
+          '<span class="cart-row__calc">' + qtyStr(it.qty) + ' × ' + money(it.costPrice) +
+            ' · прод. ' + money(it.salePrice) + '</span>' +
+        '</button>' +
+        '<span class="cart-row__sum">' + money(it.qty * it.costPrice) + '</span>' +
+        '<button class="cart-row__del" data-del="' + i + '" type="button" aria-label="Удалить">×</button>' +
       '</div>'
     ).join('');
+    box.querySelectorAll('[data-edit]').forEach(b => b.onclick =
+      () => openEntry('buy', state.cart.buy[+b.dataset.edit], +b.dataset.edit));
+    box.querySelectorAll('[data-del]').forEach(b => b.onclick =
+      () => { state.cart.buy.splice(+b.dataset.del, 1); renderBuyCart(); });
   }
-  wireCart('buy');
   $('buyTotal').textContent = money(cartTotal('buy')) + ' ' + cur();
 }
 
@@ -707,32 +742,34 @@ function setupInstallPrompt() {
   // Already installed → nothing to offer.
   if (isStandalone) return;
 
-  // iOS Safari has no install prompt API — show a manual hint (phone only).
+  // iOS Safari has no install prompt API — offer a manual hint (phone only).
   if (isIOS) {
-    btn.hidden = false;
+    state.installAvailable = true;
+    refreshInstallBtn();
     btn.addEventListener('click', () => {
       toast('Нажмите «Поделиться» внизу Safari → «На экран Домой»', 'ok');
-      btn.hidden = true;   // one-time hint per session
     });
     return;
   }
 
-  // Android Chrome: real prompt. Desktop: don't show the button at all.
+  // Android Chrome: real prompt. Desktop: never offered.
   window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
     deferredInstall = e;
-    if (isAndroid) btn.hidden = false;
+    if (isAndroid) { state.installAvailable = true; refreshInstallBtn(); }
   });
   btn.addEventListener('click', async () => {
     if (!deferredInstall) return;
     deferredInstall.prompt();
     try { await deferredInstall.userChoice; } catch (e) {}
     deferredInstall = null;
-    btn.hidden = true;
+    state.installAvailable = false;
+    refreshInstallBtn();
   });
   window.addEventListener('appinstalled', () => {
     deferredInstall = null;
-    btn.hidden = true;
+    state.installAvailable = false;
+    refreshInstallBtn();
     toast('Приложение установлено', 'ok');
   });
 }
@@ -746,13 +783,18 @@ async function init() {
   $('tokenInput').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
   $('btnLogout').addEventListener('click', doLogout);
 
-  // Show/hide token (eye toggle).
-  $('btnToggleToken').addEventListener('click', () => {
+  // Show/hide token (eye toggle). Inline SVG → renders on every device
+  // (the 👁 emoji is invisible on some Android builds).
+  const EYE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>';
+  const EYE_OFF = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 19c-7 0-11-7-11-7a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 7 11 7a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+  const eyeBtn = $('btnToggleToken');
+  eyeBtn.innerHTML = EYE;
+  eyeBtn.addEventListener('click', () => {
     const inp = $('tokenInput');
     const show = inp.type === 'password';
     inp.type = show ? 'text' : 'password';
-    $('btnToggleToken').textContent = show ? '🙈' : '👁';
-    $('btnToggleToken').setAttribute('aria-label', show ? 'Скрыть токен' : 'Показать токен');
+    eyeBtn.innerHTML = show ? EYE_OFF : EYE;
+    eyeBtn.setAttribute('aria-label', show ? 'Скрыть токен' : 'Показать токен');
     inp.focus();
   });
 
