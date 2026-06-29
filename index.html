@@ -28,7 +28,6 @@
 
   <!-- Top bar (visible after login) -->
   <header class="topbar" id="topbar" hidden>
-    <button class="btn-icon" id="btnBack" title="Назад" aria-label="Назад" hidden>‹</button>
     <div class="topbar__title">
       <span class="logo">🐟</span>
       <span id="topTitle">Salmon</span>
@@ -61,11 +60,6 @@
         <p class="error" id="loginError" hidden></p>
         <p class="muted small center">Токен выдаёт администратор. Он сохраняется только на этом устройстве.</p>
       </div>
-    </section>
-
-    <!-- ───────── HOME (button grid) ───────── -->
-    <section id="homeScreen" class="screen" hidden>
-      <div class="home-grid" id="homeGrid"><!-- buttons injected by app.js --></div>
     </section>
 
     <!-- ───────── ПРОДАТЬ ───────── -->
@@ -149,6 +143,9 @@
     </section>
 
   </main>
+
+  <!-- Bottom tab bar: primary navigation (built by app.js per role). -->
+  <nav class="tabbar" id="tabbar" hidden></nav>
 
   <!-- Install button: shown only when the browser fires
        beforeinstallprompt (PWA installable & not yet installed). -->

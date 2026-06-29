@@ -181,12 +181,13 @@ function describeError(err) {
 /* ============================================================
    3. SCREEN NAVIGATION
 ============================================================ */
-const ALL_SCREENS = ['fatalScreen', 'loginScreen', 'homeScreen', 'sellScreen', 'buyScreen', 'dataScreen'];
+const ALL_SCREENS = ['fatalScreen', 'loginScreen', 'sellScreen', 'buyScreen', 'dataScreen'];
 
 function hideScreens() { ALL_SCREENS.forEach(id => { $(id).hidden = true; }); }
 
 function showFatal(text) {
   $('topbar').hidden = true;
+  $('tabbar').hidden = true;
   hideScreens();
   $('fatalText').textContent = text;
   $('fatalScreen').hidden = false;
@@ -194,48 +195,51 @@ function showFatal(text) {
 
 function showLogin() {
   $('topbar').hidden = true;
+  $('tabbar').hidden = true;
   hideScreens();
   $('loginScreen').hidden = false;
   $('tokenInput').value = '';
 }
 
-// Show a module screen; manage the topbar title + back button.
-function showScreen(id, title, withBack) {
+// Show a single module screen and set the topbar title.
+function showScreen(id, title) {
   hideScreens();
   $('topbar').hidden = false;
   $(id).hidden = false;
   $('topTitle').textContent = title || state.config.name;
-  $('btnBack').hidden = !withBack;
-}
-
-function goHome() {
-  state.reloadData = null;
-  showScreen('homeScreen', state.config.name, false);
 }
 
 /* ============================================================
-   4. HOME GRID
+   4. BOTTOM TAB BAR (primary navigation)
 ============================================================ */
-function renderHome(session) {
+function renderTabs(session) {
   const badge = $('roleBadge');
   badge.textContent = session.role || '';
   badge.className = 'role-badge ' + (session.role === 'admin' ? 'admin' : 'viewer');
 
-  const allowed = session.modules || [];
-  const grid = $('homeGrid');
-  grid.innerHTML = '';
+  const allowed = (session.modules || []).filter(k => MODULES[k]);
+  const bar = $('tabbar');
+  bar.innerHTML = '';
   MODULE_ORDER.filter(k => allowed.indexOf(k) !== -1).forEach(k => {
     const m = MODULES[k];
     const b = document.createElement('button');
-    b.className = 'home-btn' + (m.full ? ' home-btn--full' : '');
-    b.innerHTML = '<span class="home-btn__icon">' + m.icon + '</span>' +
-                  '<span class="home-btn__label">' + escapeHtml(m.label) + '</span>';
-    b.addEventListener('click', () => openModule(k));
-    grid.appendChild(b);
+    b.className = 'tab';
+    b.dataset.key = k;
+    b.innerHTML = '<span class="tab__icon">' + m.icon + '</span>' +
+                  '<span class="tab__label">' + escapeHtml(m.label) + '</span>';
+    b.addEventListener('click', () => activate(k));
+    bar.appendChild(b);
   });
+  bar.hidden = allowed.length === 0;
+  return allowed;
 }
 
-function openModule(key) {
+// Switch to a module: highlight its tab and open its screen.
+function activate(key) {
+  state.activeTab = key;
+  $('tabbar').querySelectorAll('.tab').forEach(t => {
+    t.classList.toggle('tab--active', t.dataset.key === key);
+  });
   switch (key) {
     case 'sell':  return openSell();
     case 'buy':   return openBuy();
@@ -304,7 +308,7 @@ function renderResults(box, list, onPick) {
    6. ПРОДАТЬ
 ============================================================ */
 function openSell() {
-  showScreen('sellScreen', 'Продать', true);
+  showScreen('sellScreen', 'Продать');
   status($('sellStatus'), '', '');
   ensureCatalog()
     .then(cat => {
@@ -454,7 +458,7 @@ async function submitSell() {
    7. КУПИТЬ (приход)
 ============================================================ */
 function openBuy() {
-  showScreen('buyScreen', 'Купить', true);
+  showScreen('buyScreen', 'Купить');
   status($('buyStatus'), '', '');
   ensureCatalog()
     .then(cat => {
@@ -563,7 +567,7 @@ async function submitBuy() {
    8. DATA SCREENS — Касса / Склад / Дашборды
 ============================================================ */
 function openData(key, title, fetcher) {
-  showScreen('dataScreen', title, true);
+  showScreen('dataScreen', title);
   $('dataTitle').textContent = title;
   state.reloadData = fetcher;
   fetcher();
@@ -635,6 +639,19 @@ function renderDashboard(dash) {
 /* ============================================================
    9. LOGIN / LOGOUT
 ============================================================ */
+// Build the tab bar and open the first allowed section. Guards against an
+// out-of-date backend that doesn't yet return `modules`.
+function enterApp(session) {
+  const allowed = renderTabs(session);
+  if (!allowed.length) {
+    showFatal('Сервер вернул устаревший ответ (нет разделов). Обновите код Apps Script: ' +
+              'Deploy → Manage deployments → New version.');
+    return false;
+  }
+  activate(allowed[0]);
+  return true;
+}
+
 async function doLogin() {
   const token = $('tokenInput').value.trim();
   const btn = $('btnLogin');
@@ -647,9 +664,7 @@ async function doLogin() {
   try {
     const session = await apiGet('whoami');
     state.session = session;
-    renderHome(session);
-    goHome();
-    toast('Вы вошли как ' + session.role, 'ok');
+    if (enterApp(session)) toast('Вы вошли как ' + session.role, 'ok');
   } catch (err) {
     clearToken();
     status($('loginError'), describeError(err), 'err');
@@ -702,7 +717,6 @@ async function init() {
   $('btnLogin').addEventListener('click', doLogin);
   $('tokenInput').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
   $('btnLogout').addEventListener('click', doLogout);
-  $('btnBack').addEventListener('click', goHome);
 
   $('sellSearch').addEventListener('input', onSellSearch);
   $('sellSearch').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); onSellEnter(); } });
@@ -747,8 +761,7 @@ async function init() {
     try {
       const session = await apiGet('whoami');
       state.session = session;
-      renderHome(session);
-      goHome();
+      enterApp(session);
     } catch (e) {
       clearToken();
       showLogin();
