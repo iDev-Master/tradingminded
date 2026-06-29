@@ -1,9 +1,20 @@
-# Системные / редакторские файлы
+# ── OS / editor junk ────────────────────────────────
 .DS_Store
 Thumbs.db
 *.log
 .vscode/
 .idea/
 
-# Локальные секреты (URL/токены не коммитим в открытую при желании)
-# config.local.js
+# ── Backend & data — must NOT go to the public Pages repo ──
+# These live in ../backend (outside this repo). Patterns here are a
+# safety net in case a copy is ever placed inside webapp/.
+code.gs
+*.gs
+*.xlsx
+*.xlsm
+*.xls
+backend/
+
+# ── Local-only config (if you ever add real secrets) ──
+config.local.js
+*.local.js
