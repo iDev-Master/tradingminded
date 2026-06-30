@@ -212,6 +212,7 @@ function hideScreens() { ALL_SCREENS.forEach(id => { $(id).hidden = true; }); }
 function showFatal(text) {
   $('topbar').hidden = true;
   $('tabbar').hidden = true;
+  document.body.classList.remove('has-topbar');
   hideScreens();
   $('fatalText').textContent = text;
   $('fatalScreen').hidden = false;
@@ -221,6 +222,7 @@ function showLogin() {
   $('topbar').hidden = true;
   $('tabbar').hidden = true;
   $('btnPayment').hidden = true;
+  document.body.classList.remove('has-topbar');
   closePayMenu();
   hideScreens();
   $('loginScreen').hidden = false;
@@ -234,6 +236,7 @@ function showLogin() {
 function showScreen(id, title) {
   hideScreens();
   $('topbar').hidden = false;
+  document.body.classList.add('has-topbar');
   $(id).hidden = false;
   $('btnHeaderPay').hidden = !(id === 'sellScreen' || id === 'buyScreen');
   refreshInstallBtn();
@@ -550,7 +553,7 @@ async function submitSell() {
     toast('Укажите клиента для долга', 'err');
     return;
   }
-  const btn = $('btnSellSubmit');
+  const btn = $('btnHeaderPay');
   btn.disabled = true;
   btn.innerHTML = '<span class="spin"></span> Сохранение…';
   status($('sellStatus'), '', '');
@@ -571,7 +574,7 @@ async function submitSell() {
     toast('Ошибка', 'err');
   } finally {
     btn.disabled = false;
-    btn.textContent = 'Сохранить продажу';
+    btn.textContent = 'Оплатить';
   }
 }
 
@@ -623,9 +626,12 @@ function renderBuyCart() {
           stepperHTML(i, it.qty) +
           '<span class="cart-row__sum" data-sum="' + i + '">' + money(it.qty * it.costPrice) + '</span>' +
         '</div>' +
-        '<div class="cart-row__prices">' +
-          priceFieldHTML('cost', i, it.costPrice, 'Цена прихода') +
-          priceFieldHTML('sale', i, it.salePrice, 'Цена продажи') +
+        // Show ONE field — Стоимость (закупка). The sale price is pulled from
+        // the catalog and submitted as-is; its input appears only for NEW items
+        // (no known sale price) so it can be set on first приход.
+        '<div class="cart-row__prices' + (num(it.salePrice) > 0 ? ' cart-row__prices--one' : '') + '">' +
+          priceFieldHTML('cost', i, it.costPrice, 'Стоимость') +
+          (num(it.salePrice) > 0 ? '' : priceFieldHTML('sale', i, it.salePrice, 'Цена продажи (новый товар)')) +
         '</div>' +
       '</div>'
     ).join('');
@@ -637,7 +643,7 @@ function renderBuyCart() {
 async function submitBuy() {
   const cart = state.cart.buy;
   if (!cart.length) { toast('Пусто', 'err'); return; }
-  const btn = $('btnBuySubmit');
+  const btn = $('btnHeaderPay');
   btn.disabled = true;
   btn.innerHTML = '<span class="spin"></span> Сохранение…';
   status($('buyStatus'), '', '');
@@ -659,7 +665,7 @@ async function submitBuy() {
     toast('Ошибка', 'err');
   } finally {
     btn.disabled = false;
-    btn.textContent = 'Сохранить приход';
+    btn.textContent = 'Оплатить';
   }
 }
 
@@ -971,11 +977,9 @@ async function init() {
 
   $('sellSearch').addEventListener('input', onSellSearch);
   $('sellSearch').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); onSellEnter(); } });
-  $('btnSellSubmit').addEventListener('click', submitSell);
 
   $('buySearch').addEventListener('input', onBuySearch);
   $('buySearch').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); onBuyEnter(); } });
-  $('btnBuySubmit').addEventListener('click', submitBuy);
 
   // Header "Оплатить" — submits the cart of whichever action screen is open.
   $('btnHeaderPay').addEventListener('click', () => {

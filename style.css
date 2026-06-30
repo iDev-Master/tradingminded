@@ -39,9 +39,11 @@ html, body {
 
 /* ───────── Шапка ───────── */
 .topbar {
-  position: sticky;
+  position: fixed;        /* всегда на месте, не уезжает при скролле */
   top: 0;
-  z-index: 10;
+  left: 0;
+  right: 0;
+  z-index: 40;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -50,6 +52,8 @@ html, body {
   backdrop-filter: blur(8px);
   border-bottom: 1px solid var(--line);
 }
+/* Когда шапка-fixed видна, отодвигаем контент вниз на её высоту. */
+body.has-topbar .container { padding-top: calc(var(--safe-top) + 74px); }
 .topbar__left { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .topbar__user {
   font-weight: 700; font-size: 16px;
@@ -556,6 +560,7 @@ input.field--required { border-color: var(--warn); }
   font-weight: 700; font-size: 16px; color: var(--accent-2); white-space: nowrap;
 }
 .cart-row__prices { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.cart-row__prices--one { grid-template-columns: 1fr; }
 
 /* ───────── Дашборд ───────── */
 .dash-section {
